@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { audio } from '$lib/audio/engine.svelte';
+	import Knob from './Knob.svelte';
 
 	const env = $derived(audio.patch.env);
 
@@ -213,26 +214,70 @@
 		</g>
 	</svg>
 
-	<div class="grid grid-cols-5 gap-2 text-[11px] text-subtext0">
-		<div class="flex flex-col items-center">
-			<span class="text-peach">attack</span>
-			<span class="tabular-nums">{fmt(env.attack)}</span>
+	<div class="grid grid-cols-5 gap-2">
+		<div class="flex justify-center">
+			<Knob
+				label="attack"
+				value={env.attack}
+				min={0.001}
+				max={2}
+				step={0.001}
+				size={44}
+				curve={2}
+				format={fmt}
+				onchange={(v) => audio.setEnvelope({ attack: v })}
+			/>
 		</div>
-		<div class="flex flex-col items-center">
-			<span class="text-yellow">hold</span>
-			<span class="tabular-nums">{fmt(env.hold)}</span>
+		<div class="flex justify-center">
+			<Knob
+				label="hold"
+				value={env.hold}
+				min={0}
+				max={2}
+				step={0.001}
+				size={44}
+				curve={2}
+				format={fmt}
+				onchange={(v) => audio.setEnvelope({ hold: v })}
+			/>
 		</div>
-		<div class="flex flex-col items-center">
-			<span class="text-green">decay</span>
-			<span class="tabular-nums">{fmt(env.decay)}</span>
+		<div class="flex justify-center">
+			<Knob
+				label="decay"
+				value={env.decay}
+				min={0.001}
+				max={2}
+				step={0.001}
+				size={44}
+				curve={2}
+				format={fmt}
+				onchange={(v) => audio.setEnvelope({ decay: v })}
+			/>
 		</div>
-		<div class="flex flex-col items-center">
-			<span class="text-teal">sustain</span>
-			<span class="tabular-nums">{(env.sustain * 100).toFixed(0)}%</span>
+		<div class="flex justify-center">
+			<Knob
+				label="sustain"
+				value={env.sustain}
+				min={0}
+				max={1}
+				step={0.01}
+				size={44}
+				format={(v) => `${(v * 100).toFixed(0)}%`}
+				onchange={(v) => audio.setEnvelope({ sustain: v })}
+			/>
 		</div>
-		<div class="flex flex-col items-center">
-			<span class="text-blue">release</span>
-			<span class="tabular-nums">{fmt(env.release)}</span>
+		<div class="flex justify-center">
+			<Knob
+				label="release"
+				value={env.release}
+				min={0.001}
+				max={4}
+				step={0.001}
+				size={44}
+				curve={2}
+				format={fmt}
+				onchange={(v) => audio.setEnvelope({ release: v })}
+			/>
 		</div>
 	</div>
 </div>

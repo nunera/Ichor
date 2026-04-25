@@ -2,17 +2,26 @@ import * as Tone from 'tone';
 
 export type Waveform = 'sine' | 'square' | 'sawtooth' | 'triangle';
 
+export type OscPatch = {
+	type: Waveform;
+	level: number;
+	octave: number; // -3..+3
+	semi: number; // -12..+12
+	fine: number; // -50..+50 cents
+	enabled: boolean;
+};
+
 export type Patch = {
-	osc1: { type: Waveform; level: number };
-	osc2: { type: Waveform; detune: number; level: number; enabled: boolean };
+	osc1: OscPatch;
+	osc2: OscPatch;
 	env: { attack: number; hold: number; decay: number; sustain: number; release: number };
 	filter: { cutoff: number; resonance: number };
 	lfo: { rate: number; depth: number; enabled: boolean };
 };
 
 export const defaultPatch: Patch = {
-	osc1: { type: 'sawtooth', level: 0 },
-	osc2: { type: 'square', detune: 7, level: -6, enabled: true },
+	osc1: { type: 'sawtooth', level: 0, octave: 0, semi: 0, fine: 0, enabled: true },
+	osc2: { type: 'square', level: -6, octave: 0, semi: 0, fine: 7, enabled: true },
 	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
 	filter: { cutoff: 4000, resonance: 2 },
 	lfo: { rate: 4, depth: 1500, enabled: false }
@@ -29,6 +38,8 @@ class AudioEngine {
 	#filter: Tone.Filter | null = null;
 	#cutoffSignal: Tone.Signal<'frequency'> | null = null;
 	#lfo: Tone.LFO | null = null;
+	#analyser: Tone.Analyser | null = null;
+	#fft: Tone.Analyser | null = null;
 	#held = new Set<string>();
 
 	async start() {
@@ -42,14 +53,17 @@ class AudioEngine {
 			rolloff: -24
 		}).toDestination();
 
-		// Drive filter cutoff through a Signal so the LFO can be summed in via
-		// Web Audio's param-summing rules. As soon as ANY signal connects to
-		// filter.frequency, Tone zeroes the param's intrinsic value — so we own
-		// the value through this signal from here on.
+		// Tap analyser AFTER the filter so visualizers reflect the actual output.
+		this.#analyser = new Tone.Analyser('waveform', 1024);
+		this.#fft = new Tone.Analyser('fft', 1024);
+		this.#filter.fan(this.#analyser, this.#fft);
+
 		this.#cutoffSignal = new Tone.Signal(this.patch.filter.cutoff, 'frequency');
 		this.#cutoffSignal.connect(this.#filter.frequency);
 
-		this.#osc1Gain = new Tone.Gain(Tone.dbToGain(this.patch.osc1.level)).connect(this.#filter);
+		this.#osc1Gain = new Tone.Gain(
+			this.patch.osc1.enabled ? Tone.dbToGain(this.patch.osc1.level) : 0
+		).connect(this.#filter);
 		this.#osc2Gain = new Tone.Gain(
 			this.patch.osc2.enabled ? Tone.dbToGain(this.patch.osc2.level) : 0
 		).connect(this.#filter);
@@ -57,8 +71,6 @@ class AudioEngine {
 		this.#osc1 = new Tone.PolySynth(Tone.Synth).connect(this.#osc1Gain);
 		this.#osc2 = new Tone.PolySynth(Tone.Synth).connect(this.#osc2Gain);
 
-		// Bipolar LFO summed into filter.frequency. min/max are in the units of
-		// the destination param (Hz here). When disabled, depth collapses to 0.
 		const d = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
 		this.#lfo = new Tone.LFO({
 			frequency: this.patch.lfo.rate,
@@ -71,21 +83,32 @@ class AudioEngine {
 		this.#applyOscSettings();
 		this.#applyEnvelope();
 
-		// Warm voices so first user note has no allocation latency.
 		this.#osc1.triggerAttackRelease('C4', 0.001, undefined, 0);
 		this.#osc2.triggerAttackRelease('C4', 0.001, undefined, 0);
 
 		this.started = true;
 	}
 
+	getWaveform(): Float32Array | null {
+		return (this.#analyser?.getValue() as Float32Array | undefined) ?? null;
+	}
+
+	getFFT(): Float32Array | null {
+		return (this.#fft?.getValue() as Float32Array | undefined) ?? null;
+	}
+
+	#detuneCents(o: OscPatch) {
+		return o.octave * 1200 + o.semi * 100 + o.fine;
+	}
+
 	#applyOscSettings() {
 		this.#osc1?.set({
 			oscillator: { type: this.patch.osc1.type },
-			detune: 0
+			detune: this.#detuneCents(this.patch.osc1)
 		});
 		this.#osc2?.set({
 			oscillator: { type: this.patch.osc2.type },
-			detune: this.patch.osc2.detune
+			detune: this.#detuneCents(this.patch.osc2)
 		});
 	}
 
@@ -112,20 +135,27 @@ class AudioEngine {
 		this.#osc2?.set({ envelope: env });
 	}
 
-	setOsc1(p: Partial<Patch['osc1']>) {
-		Object.assign(this.patch.osc1, p);
-		if (p.type !== undefined) this.#osc1?.set({ oscillator: { type: p.type } });
-		if (p.level !== undefined) this.#osc1Gain?.gain.rampTo(Tone.dbToGain(p.level), 0.02);
+	#setOsc(which: 'osc1' | 'osc2', p: Partial<OscPatch>) {
+		const target = this.patch[which];
+		Object.assign(target, p);
+		const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+		const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
+
+		if (p.type !== undefined) synth?.set({ oscillator: { type: p.type } });
+		if (p.octave !== undefined || p.semi !== undefined || p.fine !== undefined) {
+			synth?.set({ detune: this.#detuneCents(target) });
+		}
+		if (p.level !== undefined || p.enabled !== undefined) {
+			const t = target.enabled ? Tone.dbToGain(target.level) : 0;
+			gain?.gain.rampTo(t, 0.02);
+		}
 	}
 
-	setOsc2(p: Partial<Patch['osc2']>) {
-		Object.assign(this.patch.osc2, p);
-		if (p.type !== undefined) this.#osc2?.set({ oscillator: { type: p.type } });
-		if (p.detune !== undefined) this.#osc2?.set({ detune: p.detune });
-		if (p.level !== undefined || p.enabled !== undefined) {
-			const target = this.patch.osc2.enabled ? Tone.dbToGain(this.patch.osc2.level) : 0;
-			this.#osc2Gain?.gain.rampTo(target, 0.02);
-		}
+	setOsc1(p: Partial<OscPatch>) {
+		this.#setOsc('osc1', p);
+	}
+	setOsc2(p: Partial<OscPatch>) {
+		this.#setOsc('osc2', p);
 	}
 
 	setEnvelope(p: Partial<Patch['env']>) {
@@ -157,7 +187,7 @@ class AudioEngine {
 	attack(note: string) {
 		if (this.#held.has(note)) return;
 		this.#held.add(note);
-		this.#osc1?.triggerAttack(note);
+		if (this.patch.osc1.enabled) this.#osc1?.triggerAttack(note);
 		if (this.patch.osc2.enabled) this.#osc2?.triggerAttack(note);
 	}
 

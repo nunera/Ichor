@@ -2,32 +2,64 @@
 	import { audio } from '$lib/audio/engine.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 
-	type Key = { note: string; key: string; black?: boolean; offset?: number };
+	type Props = { octaves?: number };
+	let { octaves = 3 }: Props = $props();
 
-	// One octave, C4–C5. White keys laid out in flow; black keys absolutely
-	// positioned via `offset` (in white-key units from the left edge).
-	const keys: Key[] = [
-		{ note: 'C4', key: 'a' },
-		{ note: 'C#4', key: 'w', black: true, offset: 1 },
-		{ note: 'D4', key: 's' },
-		{ note: 'D#4', key: 'e', black: true, offset: 2 },
-		{ note: 'E4', key: 'd' },
-		{ note: 'F4', key: 'f' },
-		{ note: 'F#4', key: 't', black: true, offset: 4 },
-		{ note: 'G4', key: 'g' },
-		{ note: 'G#4', key: 'y', black: true, offset: 5 },
-		{ note: 'A4', key: 'h' },
-		{ note: 'A#4', key: 'u', black: true, offset: 6 },
-		{ note: 'B4', key: 'j' },
-		{ note: 'C5', key: 'k' }
+	// 12-note row mapped to home-row + qwerty-top-row keybinds. Repeats one
+	// octave higher for an upper row of bindings, so two octaves are playable
+	// from the keyboard at any time around `octaveBase`.
+	const PITCH_CLASSES: { name: string; black: boolean; white: number }[] = [
+		{ name: 'C', black: false, white: 0 },
+		{ name: 'C#', black: true, white: 1 },
+		{ name: 'D', black: false, white: 1 },
+		{ name: 'D#', black: true, white: 2 },
+		{ name: 'E', black: false, white: 2 },
+		{ name: 'F', black: false, white: 3 },
+		{ name: 'F#', black: true, white: 4 },
+		{ name: 'G', black: false, white: 4 },
+		{ name: 'G#', black: true, white: 5 },
+		{ name: 'A', black: false, white: 5 },
+		{ name: 'A#', black: true, white: 6 },
+		{ name: 'B', black: false, white: 6 }
 	];
 
-	const whites = keys.filter((k) => !k.black);
-	const blacks = keys.filter((k) => k.black);
+	// Lower row (home + black keys above): C..B at octaveBase
+	const LOWER_BIND = ['a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j'];
+	// Upper row: C..B at octaveBase+1
+	const UPPER_BIND = ['k', 'o', 'l', 'p', ';', "'", ']', '\\', '', '', '', ''];
 
-	// Notes currently lit in the UI (one entry per held source: keyboard or pointer).
+	let octaveBase = $state(3); // C3 row + C4 row by default
+
+	type Key = { note: string; midi: number; key: string; black: boolean; white: number };
+
+	const keys = $derived.by<Key[]>(() => {
+		const out: Key[] = [];
+		for (let o = 0; o < octaves; o++) {
+			const oct = (octaveBase ?? 3) + o; // visible octave number
+			for (let i = 0; i < 12; i++) {
+				const pc = PITCH_CLASSES[i];
+				const note = `${pc.name}${oct}`;
+				const midi = (oct + 1) * 12 + i;
+				const bindArr = o === 0 ? LOWER_BIND : o === 1 ? UPPER_BIND : [];
+				const key = bindArr[i] ?? '';
+				out.push({
+					note,
+					midi,
+					key,
+					black: pc.black,
+					white: o * 7 + pc.white
+				});
+			}
+		}
+		return out;
+	});
+
+	const totalWhites = $derived(octaves * 7);
+	const whites = $derived(keys.filter((k) => !k.black));
+	const blacks = $derived(keys.filter((k) => k.black));
+
+	// Visual highlights and per-pointer note tracking for glissando.
 	const held = new SvelteSet<string>();
-	// Maps a pointerId to the note it is currently sounding, for glissando.
 	const pointerNote = new Map<number, string>();
 
 	function press(note: string) {
@@ -36,7 +68,6 @@
 	}
 
 	function release(note: string) {
-		// Only remove the visual highlight if no other source still holds the note.
 		const stillHeldByPointer = [...pointerNote.values()].includes(note);
 		if (!stillHeldByPointer) held.delete(note);
 		audio.release(note);
@@ -62,8 +93,6 @@
 		const next = noteAt(e.clientX, e.clientY);
 		const prev = pointerNote.get(e.pointerId)!;
 		if (next === prev) return;
-		// Update the map FIRST so `release(prev)` sees the new state
-		// when it checks whether any other pointer still holds the note.
 		if (next) pointerNote.set(e.pointerId, next);
 		else pointerNote.delete(e.pointerId);
 		release(prev);
@@ -77,8 +106,29 @@
 		release(note);
 	}
 
+	function shift(delta: number) {
+		// Release whatever is currently held by the keyboard binding before
+		// shifting, so we never strand a sustaining note.
+		panic();
+		octaveBase = clamp(octaveBase + delta, 0, 8);
+	}
+
+	function clamp(v: number, lo: number, hi: number) {
+		return Math.max(lo, Math.min(hi, v));
+	}
+
 	async function onKeyDown(e: KeyboardEvent) {
 		if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+		if (e.key === 'z') {
+			e.preventDefault();
+			shift(-1);
+			return;
+		}
+		if (e.key === 'x') {
+			e.preventDefault();
+			shift(+1);
+			return;
+		}
 		const k = keys.find((x) => x.key === e.key.toLowerCase());
 		if (!k) return;
 		e.preventDefault();
@@ -109,43 +159,72 @@
 	onvisibilitychange={onVisibility}
 />
 
-<div
-	class="relative flex h-48 w-full touch-none select-none"
-	onpointerdown={onPointerDown}
-	onpointermove={onPointerMove}
-	onpointerup={onPointerUp}
-	onpointercancel={onPointerUp}
->
-	{#each whites as k (k.note)}
-		{@const active = held.has(k.note)}
-		<div
-			data-note={k.note}
-			class="relative flex flex-1 flex-col justify-end rounded-b-lg border border-surface1 pb-3 text-center text-xs shadow-md transition-colors"
-			class:bg-base={!active}
-			class:text-subtext0={!active}
-			class:bg-mauve={active}
-			class:text-base={active}
+<div class="flex flex-col gap-2">
+	<div class="flex items-center gap-2 text-xs text-subtext0">
+		<button
+			class="rounded border border-surface1 bg-surface0 px-2 py-1 text-text hover:bg-surface1"
+			onclick={() => shift(-1)}
+			aria-label="octave down"
 		>
-			<div class="font-semibold">{k.note}</div>
-			<div class="opacity-60">{k.key}</div>
-		</div>
-	{/each}
+			−
+		</button>
+		<span class="tabular-nums">
+			C{octaveBase} – B{octaveBase + octaves - 1}
+		</span>
+		<button
+			class="rounded border border-surface1 bg-surface0 px-2 py-1 text-text hover:bg-surface1"
+			onclick={() => shift(+1)}
+			aria-label="octave up"
+		>
+			+
+		</button>
+		<span class="ml-2 text-overlay1"> z / x to shift </span>
+	</div>
 
-	{#each blacks as k (k.note)}
-		{@const active = held.has(k.note)}
-		{@const leftPct = (k.offset! / whites.length) * 100}
-		{@const widthPct = (1 / whites.length) * 0.6 * 100}
-		<div
-			data-note={k.note}
-			class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-crust pb-2 text-center text-[10px] shadow-lg transition-colors"
-			class:bg-crust={!active}
-			class:text-subtext0={!active}
-			class:bg-lavender={active}
-			class:text-crust={active}
-			style:left="{leftPct}%"
-			style:width="{widthPct}%"
-		>
-			<div>{k.key}</div>
-		</div>
-	{/each}
+	<div
+		class="relative flex h-48 w-full touch-none select-none"
+		onpointerdown={onPointerDown}
+		onpointermove={onPointerMove}
+		onpointerup={onPointerUp}
+		onpointercancel={onPointerUp}
+	>
+		{#each whites as k (k.note)}
+			{@const active = held.has(k.note)}
+			<div
+				data-note={k.note}
+				class="relative flex flex-1 flex-col justify-end rounded-b-lg border border-surface1 pb-3 text-center text-[10px] shadow-md transition-colors"
+				class:bg-base={!active}
+				class:text-subtext0={!active}
+				class:bg-mauve={active}
+				class:text-base={active}
+			>
+				{#if k.note.startsWith('C')}
+					<div class="font-semibold">{k.note}</div>
+				{/if}
+				{#if k.key}
+					<div class="opacity-60">{k.key}</div>
+				{/if}
+			</div>
+		{/each}
+
+		{#each blacks as k (k.note)}
+			{@const active = held.has(k.note)}
+			{@const leftPct = (k.white / totalWhites) * 100}
+			{@const widthPct = (1 / totalWhites) * 0.6 * 100}
+			<div
+				data-note={k.note}
+				class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-crust pb-2 text-center text-[9px] shadow-lg transition-colors"
+				class:bg-crust={!active}
+				class:text-subtext0={!active}
+				class:bg-lavender={active}
+				class:text-crust={active}
+				style:left="{leftPct}%"
+				style:width="{widthPct}%"
+			>
+				{#if k.key}
+					<div>{k.key}</div>
+				{/if}
+			</div>
+		{/each}
+	</div>
 </div>

@@ -3,6 +3,7 @@
 	import Keyboard from '$lib/ui/Keyboard.svelte';
 	import SoundDesign from '$lib/ui/SoundDesign.svelte';
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
+	import Visualizer from '$lib/ui/Visualizer.svelte';
 
 	let volume = $state(-12);
 
@@ -11,7 +12,7 @@
 	});
 </script>
 
-<main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 p-8">
+<main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-8">
 	<header class="flex items-end justify-between gap-4">
 		<div>
 			<h1 class="text-3xl tracking-widest text-text lowercase">ichor</h1>
@@ -30,10 +31,14 @@
 
 	<SoundDesign />
 
-	<Keyboard />
+	<Visualizer />
+
+	<Keyboard octaves={3} />
 
 	<footer class="text-xs text-overlay1">
-		click/drag a key, or press
-		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">a w s e d f t g y h u j k</kbd>
+		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">a–j</kbd> /
+		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">k–'</kbd> play notes ·
+		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">z</kbd>
+		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">x</kbd> shift octave
 	</footer>
 </main>

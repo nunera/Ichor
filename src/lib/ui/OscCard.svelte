@@ -8,7 +8,6 @@
 
 	const waves: Waveform[] = ['sine', 'square', 'sawtooth', 'triangle'];
 	const osc = $derived(audio.patch[which]);
-	const enabled = $derived(which === 'osc1' ? true : audio.patch.osc2.enabled);
 	const title = $derived(which === 'osc1' ? 'osc 1' : 'osc 2');
 
 	function set(p: Record<string, unknown>) {
@@ -25,23 +24,17 @@
 
 <section
 	class="flex flex-col gap-3 rounded-lg border border-surface0 bg-mantle/60 p-3"
-	class:opacity-50={!enabled}
+	class:opacity-50={!osc.enabled}
 >
-	<header class="flex items-center justify-between">
-		<div class="flex items-center gap-2">
-			{#if which === 'osc2'}
-				<input
-					type="checkbox"
-					checked={audio.patch.osc2.enabled}
-					onchange={(e) => audio.setOsc2({ enabled: e.currentTarget.checked })}
-					class="accent-mauve"
-					aria-label="enable osc 2"
-				/>
-			{:else}
-				<span class="h-2 w-2 rounded-full bg-mauve"></span>
-			{/if}
-			<span class="text-xs tracking-widest text-subtext0 uppercase">{title}</span>
-		</div>
+	<header class="flex items-center gap-2">
+		<input
+			type="checkbox"
+			checked={osc.enabled}
+			onchange={(e) => set({ enabled: e.currentTarget.checked })}
+			class="accent-mauve"
+			aria-label="enable {title}"
+		/>
+		<span class="text-xs tracking-widest text-subtext0 uppercase">{title}</span>
 	</header>
 
 	<!-- Waveform display + selector -->
@@ -62,27 +55,51 @@
 		>
 	</div>
 
-	<!-- Knobs row -->
+	<!-- Pitch row -->
 	<div class="flex justify-around">
+		<Knob
+			label="oct"
+			value={osc.octave}
+			min={-3}
+			max={3}
+			step={1}
+			size={40}
+			format={(v) => (v > 0 ? `+${v}` : `${v}`)}
+			onchange={(v) => set({ octave: v })}
+		/>
+		<Knob
+			label="semi"
+			value={osc.semi}
+			min={-12}
+			max={12}
+			step={1}
+			size={40}
+			format={(v) => (v > 0 ? `+${v}` : `${v}`)}
+			onchange={(v) => set({ semi: v })}
+		/>
+		<Knob
+			label="fine"
+			value={osc.fine}
+			min={-50}
+			max={50}
+			step={1}
+			size={40}
+			unit=" ct"
+			onchange={(v) => set({ fine: v })}
+		/>
+	</div>
+
+	<!-- Level -->
+	<div class="flex justify-center">
 		<Knob
 			label="level"
 			value={osc.level}
 			min={-40}
 			max={6}
 			step={1}
+			size={48}
 			unit=" dB"
 			onchange={(v) => set({ level: v })}
 		/>
-		{#if which === 'osc2'}
-			<Knob
-				label="detune"
-				value={audio.patch.osc2.detune}
-				min={-50}
-				max={50}
-				step={1}
-				unit=" ct"
-				onchange={(v) => audio.setOsc2({ detune: v })}
-			/>
-		{/if}
 	</div>
 </section>
