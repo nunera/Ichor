@@ -25,62 +25,116 @@
 	const whites = keys.filter((k) => !k.black);
 	const blacks = keys.filter((k) => k.black);
 
+	// Notes currently lit in the UI (one entry per held source: keyboard or pointer).
 	const held = new SvelteSet<string>();
+	// Maps a pointerId to the note it is currently sounding, for glissando.
+	const pointerNote = new Map<number, string>();
 
-	async function press(note: string) {
-		await audio.start();
-		if (held.has(note)) return;
+	function press(note: string) {
 		held.add(note);
 		audio.attack(note);
 	}
 
 	function release(note: string) {
-		if (!held.delete(note)) return;
+		// Only remove the visual highlight if no other source still holds the note.
+		const stillHeldByPointer = [...pointerNote.values()].includes(note);
+		if (!stillHeldByPointer) held.delete(note);
 		audio.release(note);
 	}
 
-	function onKeyDown(e: KeyboardEvent) {
+	function noteAt(x: number, y: number): string | null {
+		const el = document.elementFromPoint(x, y);
+		const keyEl = el?.closest<HTMLElement>('[data-note]');
+		return keyEl?.dataset.note ?? null;
+	}
+
+	async function onPointerDown(e: PointerEvent) {
+		await audio.start();
+		const note = noteAt(e.clientX, e.clientY);
+		if (!note) return;
+		(e.target as Element).setPointerCapture?.(e.pointerId);
+		pointerNote.set(e.pointerId, note);
+		press(note);
+	}
+
+	function onPointerMove(e: PointerEvent) {
+		if (!pointerNote.has(e.pointerId)) return;
+		const next = noteAt(e.clientX, e.clientY);
+		const prev = pointerNote.get(e.pointerId)!;
+		if (next === prev) return;
+		// Update the map FIRST so `release(prev)` sees the new state
+		// when it checks whether any other pointer still holds the note.
+		if (next) pointerNote.set(e.pointerId, next);
+		else pointerNote.delete(e.pointerId);
+		release(prev);
+		if (next) press(next);
+	}
+
+	function onPointerUp(e: PointerEvent) {
+		const note = pointerNote.get(e.pointerId);
+		if (!note) return;
+		pointerNote.delete(e.pointerId);
+		release(note);
+	}
+
+	async function onKeyDown(e: KeyboardEvent) {
 		if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
 		const k = keys.find((x) => x.key === e.key.toLowerCase());
-		if (k) {
-			e.preventDefault();
-			press(k.note);
-		}
+		if (!k) return;
+		e.preventDefault();
+		await audio.start();
+		press(k.note);
 	}
 
 	function onKeyUp(e: KeyboardEvent) {
 		const k = keys.find((x) => x.key === e.key.toLowerCase());
 		if (k) release(k.note);
 	}
+
+	function panic() {
+		held.clear();
+		pointerNote.clear();
+		audio.releaseAll();
+	}
+
+	function onVisibility() {
+		if (document.visibilityState === 'hidden') panic();
+	}
 </script>
 
-<svelte:window onkeydown={onKeyDown} onkeyup={onKeyUp} />
+<svelte:window
+	onkeydown={onKeyDown}
+	onkeyup={onKeyUp}
+	onblur={panic}
+	onvisibilitychange={onVisibility}
+/>
 
-<div class="relative flex h-48 w-full select-none">
+<div
+	class="relative flex h-48 w-full touch-none select-none"
+	onpointerdown={onPointerDown}
+	onpointermove={onPointerMove}
+	onpointerup={onPointerUp}
+	onpointercancel={onPointerUp}
+>
 	{#each whites as k (k.note)}
 		{@const active = held.has(k.note)}
-		<button
+		<div
+			data-note={k.note}
 			class="relative flex flex-1 flex-col justify-end rounded-b-lg border border-neutral-700 pb-3 text-center text-xs text-neutral-900 shadow-md transition-colors"
 			class:bg-neutral-100={!active}
 			class:bg-amber-300={active}
-			onpointerdown={(e) => {
-				e.currentTarget.setPointerCapture(e.pointerId);
-				press(k.note);
-			}}
-			onpointerup={() => release(k.note)}
-			onpointercancel={() => release(k.note)}
-			onpointerleave={() => release(k.note)}
 		>
 			<div class="font-semibold">{k.note}</div>
 			<div class="text-neutral-500">{k.key}</div>
-		</button>
+		</div>
 	{/each}
 
 	{#each blacks as k (k.note)}
 		{@const active = held.has(k.note)}
 		{@const leftPct = (k.offset! / whites.length) * 100}
 		{@const widthPct = (1 / whites.length) * 0.6 * 100}
-		<button
+		<div
+			data-note={k.note}
 			class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-black pb-2 text-center text-[10px] shadow-lg transition-colors"
 			class:bg-neutral-900={!active}
 			class:bg-amber-600={active}
@@ -88,15 +142,8 @@
 			class:text-neutral-100={active}
 			style:left="{leftPct}%"
 			style:width="{widthPct}%"
-			onpointerdown={(e) => {
-				e.currentTarget.setPointerCapture(e.pointerId);
-				press(k.note);
-			}}
-			onpointerup={() => release(k.note)}
-			onpointercancel={() => release(k.note)}
-			onpointerleave={() => release(k.note)}
 		>
 			<div>{k.key}</div>
-		</button>
+		</div>
 	{/each}
 </div>
