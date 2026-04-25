@@ -120,12 +120,14 @@
 		{@const active = held.has(k.note)}
 		<div
 			data-note={k.note}
-			class="relative flex flex-1 flex-col justify-end rounded-b-lg border border-neutral-700 pb-3 text-center text-xs text-neutral-900 shadow-md transition-colors"
-			class:bg-neutral-100={!active}
-			class:bg-amber-300={active}
+			class="relative flex flex-1 flex-col justify-end rounded-b-lg border border-surface1 pb-3 text-center text-xs shadow-md transition-colors"
+			class:bg-base={!active}
+			class:text-subtext0={!active}
+			class:bg-mauve={active}
+			class:text-base={active}
 		>
 			<div class="font-semibold">{k.note}</div>
-			<div class="text-neutral-500">{k.key}</div>
+			<div class="opacity-60">{k.key}</div>
 		</div>
 	{/each}
 
@@ -135,11 +137,11 @@
 		{@const widthPct = (1 / whites.length) * 0.6 * 100}
 		<div
 			data-note={k.note}
-			class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-black pb-2 text-center text-[10px] shadow-lg transition-colors"
-			class:bg-neutral-900={!active}
-			class:bg-amber-600={active}
-			class:text-neutral-400={!active}
-			class:text-neutral-100={active}
+			class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-crust pb-2 text-center text-[10px] shadow-lg transition-colors"
+			class:bg-crust={!active}
+			class:text-subtext0={!active}
+			class:bg-lavender={active}
+			class:text-crust={active}
 			style:left="{leftPct}%"
 			style:width="{widthPct}%"
 		>
