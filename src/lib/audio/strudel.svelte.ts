@@ -70,6 +70,27 @@ class StrudelBridge {
 			// Voicing
 			core.registerControl('voiceMode');
 			core.registerControl('glide');
+			// Effects
+			core.registerControl('reverbEnabled');
+			core.registerControl('reverbDecay');
+			core.registerControl('reverbPreDelay');
+			core.registerControl('reverbMix');
+			core.registerControl('delayEnabled');
+			core.registerControl('delayTime');
+			core.registerControl('delayFeedback');
+			core.registerControl('delayPingPong');
+			core.registerControl('delayMix');
+			core.registerControl('distortionEnabled');
+			core.registerControl('distortionDrive');
+			core.registerControl('distortionMix');
+			core.registerControl('chorusEnabled');
+			core.registerControl('chorusRate');
+			core.registerControl('chorusDepth');
+			core.registerControl('chorusSpread');
+			core.registerControl('chorusMix');
+			core.registerControl('bitcrusherEnabled');
+			core.registerControl('bitcrusherBits');
+			core.registerControl('bitcrusherMix');
 
 			let activePattern: any = null;
 			let isPlaying = false;
@@ -289,6 +310,92 @@ class StrudelBridge {
 								{
 									...(v.voiceMode !== undefined && { mode: v.voiceMode }),
 									...(v.glide !== undefined && { glide: v.glide })
+								},
+								'remote'
+							);
+						}
+
+						// Effects
+						if (
+							v?.reverbEnabled !== undefined ||
+							v?.reverbDecay !== undefined ||
+							v?.reverbPreDelay !== undefined ||
+							v?.reverbMix !== undefined
+						) {
+							audio.setReverb(
+								{
+									...(v.reverbEnabled !== undefined && { enabled: !!v.reverbEnabled }),
+									...(v.reverbDecay !== undefined && { decay: v.reverbDecay }),
+									...(v.reverbPreDelay !== undefined && { preDelay: v.reverbPreDelay }),
+									...(v.reverbMix !== undefined && { mix: v.reverbMix })
+								},
+								'remote'
+							);
+						}
+
+						if (
+							v?.delayEnabled !== undefined ||
+							v?.delayTime !== undefined ||
+							v?.delayFeedback !== undefined ||
+							v?.delayPingPong !== undefined ||
+							v?.delayMix !== undefined
+						) {
+							audio.setDelay(
+								{
+									...(v.delayEnabled !== undefined && { enabled: !!v.delayEnabled }),
+									...(v.delayTime !== undefined && { time: v.delayTime }),
+									...(v.delayFeedback !== undefined && { feedback: v.delayFeedback }),
+									...(v.delayPingPong !== undefined && { pingPong: !!v.delayPingPong }),
+									...(v.delayMix !== undefined && { mix: v.delayMix })
+								},
+								'remote'
+							);
+						}
+
+						if (
+							v?.distortionEnabled !== undefined ||
+							v?.distortionDrive !== undefined ||
+							v?.distortionMix !== undefined
+						) {
+							audio.setDistortion(
+								{
+									...(v.distortionEnabled !== undefined && { enabled: !!v.distortionEnabled }),
+									...(v.distortionDrive !== undefined && { drive: v.distortionDrive }),
+									...(v.distortionMix !== undefined && { mix: v.distortionMix })
+								},
+								'remote'
+							);
+						}
+
+						if (
+							v?.chorusEnabled !== undefined ||
+							v?.chorusRate !== undefined ||
+							v?.chorusDepth !== undefined ||
+							v?.chorusSpread !== undefined ||
+							v?.chorusMix !== undefined
+						) {
+							audio.setChorus(
+								{
+									...(v.chorusEnabled !== undefined && { enabled: !!v.chorusEnabled }),
+									...(v.chorusRate !== undefined && { rate: v.chorusRate }),
+									...(v.chorusDepth !== undefined && { depth: v.chorusDepth }),
+									...(v.chorusSpread !== undefined && { spread: v.chorusSpread }),
+									...(v.chorusMix !== undefined && { mix: v.chorusMix })
+								},
+								'remote'
+							);
+						}
+
+						if (
+							v?.bitcrusherEnabled !== undefined ||
+							v?.bitcrusherBits !== undefined ||
+							v?.bitcrusherMix !== undefined
+						) {
+							audio.setBitcrusher(
+								{
+									...(v.bitcrusherEnabled !== undefined && { enabled: !!v.bitcrusherEnabled }),
+									...(v.bitcrusherBits !== undefined && { bits: v.bitcrusherBits }),
+									...(v.bitcrusherMix !== undefined && { mix: v.bitcrusherMix })
 								},
 								'remote'
 							);
