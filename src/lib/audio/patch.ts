@@ -13,7 +13,7 @@ import { z } from 'zod';
  * - Times in seconds, frequencies in Hz, levels in dB, cents in cents.
  */
 
-export const Waveform = z.enum(['sine', 'square', 'sawtooth', 'triangle']);
+export const Waveform = z.enum(['sine', 'square', 'sawtooth', 'triangle', 'pulse']);
 export type Waveform = z.infer<typeof Waveform>;
 
 export const OscPatchSchema = z.object({
@@ -22,7 +22,13 @@ export const OscPatchSchema = z.object({
 	octave: z.number().int().min(-3).max(3),
 	semi: z.number().int().min(-12).max(12),
 	fine: z.number().min(-50).max(50),
-	enabled: z.boolean()
+	enabled: z.boolean(),
+	/** Unison voice count (1 = off). fat* oscillator when >1. */
+	unison: z.number().int().min(1).max(8).default(1),
+	/** Unison detune spread in cents (active when unison > 1). */
+	spread: z.number().min(0).max(200).default(0),
+	/** Pulse width 0–1 (only affects pulse waveform). */
+	width: z.number().min(0).max(1).default(0.5)
 });
 export type OscPatch = z.infer<typeof OscPatchSchema>;
 
@@ -37,32 +43,73 @@ export type Envelope = z.infer<typeof EnvelopeSchema>;
 
 export const FilterSchema = z.object({
 	cutoff: z.number().min(20).max(20000),
-	resonance: z.number().min(0.1).max(20)
+	resonance: z.number().min(0.1).max(20),
+	type: z.enum(['lowpass', 'highpass', 'bandpass', 'notch']).default('lowpass')
 });
 export type Filter = z.infer<typeof FilterSchema>;
 
 export const LFOSchema = z.object({
 	rate: z.number().min(0.01).max(40),
 	depth: z.number().min(0).max(10000),
-	enabled: z.boolean()
+	enabled: z.boolean(),
+	shape: z.enum(['sine', 'square', 'triangle', 'sawtooth']).default('sine')
 });
 export type LFO = z.infer<typeof LFOSchema>;
+
+export const SubOscSchema = z.object({
+	level: z.number().min(-60).max(0),
+	octave: z.number().int().min(-3).max(0),
+	enabled: z.boolean(),
+	type: z.enum(['sine', 'triangle', 'square', 'sawtooth']).default('sine'),
+	pan: z.number().min(-1).max(1).default(0)
+});
+export type SubOsc = z.infer<typeof SubOscSchema>;
+
+export const VoicingSchema = z.object({
+	/**
+	 * poly  – standard polyphony, no glide
+	 * mono  – last-note priority, envelope retriggers, no glide
+	 * legato – monophonic + portamento (pitch slides, envelope retriggers)
+	 * porta  – polyphonic + portamento (each voice glides)
+	 * scale  – monophonic + proportional portamento (glide scales with interval)
+	 */
+	mode: z.enum(['poly', 'mono', 'legato', 'porta', 'scale']).default('poly'),
+	glide: z.number().min(0).max(2).default(0.08)
+});
+export type Voicing = z.infer<typeof VoicingSchema>;
+
+export const NoiseSchema = z.object({
+	enabled: z.boolean(),
+	type: z.enum(['white', 'pink', 'brown']).default('white'),
+	level: z.number().min(-60).max(0).default(-12),
+	pan: z.number().min(-1).max(1).default(0)
+});
+export type NoisePatch = z.infer<typeof NoiseSchema>;
 
 export const PatchSchema = z.object({
 	osc1: OscPatchSchema,
 	osc2: OscPatchSchema,
 	env: EnvelopeSchema,
 	filter: FilterSchema,
-	lfo: LFOSchema
+	lfo: LFOSchema,
+	sub: SubOscSchema.default({ level: -6, octave: -1, enabled: false, type: 'sine' }),
+	noise: NoiseSchema.default({ enabled: false, type: 'white', level: -12, pan: 0 }),
+	voicing: VoicingSchema.default({ mode: 'poly', glide: 0.08 })
 });
 export type Patch = z.infer<typeof PatchSchema>;
 
+/** Input type — new fields with defaults are optional. Use for presets / inbound JSON. */
+export type PatchInput = z.input<typeof PatchSchema>;
+
 export const defaultPatch: Patch = {
-	osc1: { type: 'sawtooth', level: 0, octave: 0, semi: 0, fine: 0, enabled: true },
-	osc2: { type: 'square', level: -6, octave: 0, semi: 0, fine: 7, enabled: true },
+	osc1: { type: 'sawtooth', level: 0, octave: 0, semi: 0, fine: 0, enabled: true, unison: 1, spread: 0, width: 0.5 },
+	osc2: { type: 'square', level: -6, octave: 0, semi: 0, fine: 7, enabled: true, unison: 1, spread: 0, width: 0.5 },
 	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
-	filter: { cutoff: 4000, resonance: 2 },
-	lfo: { rate: 4, depth: 1500, enabled: false }
+	filter: { cutoff: 4000, resonance: 2, type: 'lowpass' },
+	lfo: { rate: 4, depth: 1500, enabled: false, shape: 'sine' },
+	sub: { level: -6, octave: -1, enabled: false, type: 'sine' },
+	noise: { enabled: false, type: 'white', level: -12, pan: 0 },
+	voicing: { mode: 'poly', glide: 0.08 }
 };
 
 /* ------------------------------------------------------------------------ */
@@ -78,7 +125,10 @@ export const SectionPartials = {
 	osc2: OscPatchSchema.partial(),
 	env: EnvelopeSchema.partial(),
 	filter: FilterSchema.partial(),
-	lfo: LFOSchema.partial()
+	lfo: LFOSchema.partial(),
+	sub: SubOscSchema.partial(),
+	noise: NoiseSchema.partial(),
+	voicing: VoicingSchema.partial()
 } as const;
 
 export type Section = keyof typeof SectionPartials;

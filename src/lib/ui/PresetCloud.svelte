@@ -11,236 +11,331 @@
 		vx: number;
 		vy: number;
 		r: number;
+		tx: number;
+		ty: number;
 	};
 
 	type Props = { active: boolean };
 	let { active }: Props = $props();
 
 	let container: HTMLDivElement;
-	let nodes = $state<Node[]>([]);
-	let edges = $state<[number, number][]>([]);
+	let canvas: HTMLCanvasElement;
+	let nodes: Node[] = [];
+	let edges: [number, number][] = [];
 	let hover = $state<number | null>(null);
-	let dragging = $state<number | null>(null);
+	let focused = $state<number | null>(null);
+	let dragging: number | null = null;
 	let dragOffset = { x: 0, y: 0 };
-	let bounds = $state({ w: 600, h: 400 });
+	let bounds = { w: 600, h: 400 };
 	let raf = 0;
+	let previewTimer = 0;
 
-	function init() {
-		const r = container.getBoundingClientRect();
-		bounds = { w: r.width, h: r.height };
+	function preview(name: string) {
+		if (!audio.started) return;
+		clearTimeout(previewTimer);
+		audio.releaseAll();
+		audio.loadPatch(presets[name].patch, 'editor');
+		audio.attack('A3');
+		previewTimer = window.setTimeout(() => audio.release('A3'), 700);
+	}
 
-		nodes = presetNames.map((name) => ({
-			name,
-			category: presets[name].category,
-			// Sprinkle around the centre with small jitter; physics will spread them.
-			x: bounds.w / 2 + (Math.random() - 0.5) * Math.min(bounds.w, 400),
-			y: bounds.h / 2 + (Math.random() - 0.5) * Math.min(bounds.h, 300),
-			vx: 0,
-			vy: 0,
-			r: 22
-		}));
+	function draw() {
+		if (!canvas) return;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return;
+		ctx.clearRect(0, 0, bounds.w, bounds.h);
 
-		// Edges: every node connects to every other node in the same category.
-		edges = [];
+		// Category lines — always visible, highlight on hover.
+		const hoverCat = hover !== null ? nodes[hover]?.category : null;
+		ctx.lineWidth = 1.5;
+		for (const [i, j] of edges) {
+			const cat = nodes[i].category;
+			const lit = hoverCat === cat;
+			ctx.globalAlpha = lit ? 0.75 : 0.22;
+			ctx.strokeStyle = categoryColor[cat];
+			ctx.beginPath();
+			ctx.moveTo(nodes[i].x, nodes[i].y);
+			ctx.lineTo(nodes[j].x, nodes[j].y);
+			ctx.stroke();
+		}
+		ctx.globalAlpha = 1;
+
+		// Dots
+		const pivot = hover ?? focused;
 		for (let i = 0; i < nodes.length; i++) {
-			for (let j = i + 1; j < nodes.length; j++) {
-				if (nodes[i].category === nodes[j].category) edges.push([i, j]);
+			const n = nodes[i];
+			const isHov = hover === i;
+			const isFoc = focused === i;
+			const related = pivot === null || pivot === i || nodes[pivot]?.category === n.category;
+			const r = (isHov || isFoc) ? n.r * 1.2 : n.r;
+
+			if (isHov) {
+				ctx.globalAlpha = 0.35;
+				ctx.fillStyle = categoryColor[n.category];
+				ctx.beginPath();
+				ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
+				ctx.fill();
+			}
+
+			ctx.globalAlpha = related ? 1 : 0.2;
+			ctx.fillStyle = categoryColor[n.category];
+			ctx.beginPath();
+			ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+			ctx.fill();
+
+			if (isFoc) {
+				ctx.globalAlpha = 1;
+				ctx.strokeStyle = '#ffffff';
+				ctx.lineWidth = 1.5;
+				ctx.beginPath();
+				ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2);
+				ctx.stroke();
 			}
 		}
+
+		ctx.globalAlpha = 1;
+	}
+
+	function init() {
+		const rect = container.getBoundingClientRect();
+		bounds = { w: rect.width, h: rect.height };
+		canvas.width = bounds.w;
+		canvas.height = bounds.h;
+
+		const cx = bounds.w / 2;
+		const cy = bounds.h / 2;
+		const N = presetNames.length;
+		const R_outer = Math.min(bounds.w, bounds.h) * 0.44;
+		const R_inner = R_outer * 0.42;
+		const SIDES = 7;
+
+		// Build the 14-vertex star polygon.
+		const starVerts: [number, number][] = [];
+		for (let k = 0; k < SIDES; k++) {
+			const outerA = -Math.PI / 2 + (2 * Math.PI * k) / SIDES;
+			const innerA = outerA + Math.PI / SIDES;
+			starVerts.push([cx + Math.cos(outerA) * R_outer, cy + Math.sin(outerA) * R_outer]);
+			starVerts.push([cx + Math.cos(innerA) * R_inner, cy + Math.sin(innerA) * R_inner]);
+		}
+		starVerts.push(starVerts[0]);
+
+		// Ray-cast point-in-polygon for the star shape.
+		function inStar(px: number, py: number): boolean {
+			let inside = false;
+			const n = starVerts.length - 1;
+			for (let i = 0, j = n - 1; i < n; j = i++) {
+				const xi = starVerts[i][0], yi = starVerts[i][1];
+				const xj = starVerts[j][0], yj = starVerts[j][1];
+				if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi)
+					inside = !inside;
+			}
+			return inside;
+		}
+
+		// Jittered grid — keep only points inside the star.
+		const spacing = 15;
+		const jitter = spacing * 0.5;
+		const candidates: [number, number][] = [];
+		for (let gy = cy - R_outer; gy <= cy + R_outer; gy += spacing) {
+			for (let gx = cx - R_outer; gx <= cx + R_outer; gx += spacing) {
+				const px = gx + (Math.random() - 0.5) * jitter;
+				const py = gy + (Math.random() - 0.5) * jitter;
+				if (inStar(px, py)) candidates.push([px, py]);
+			}
+		}
+
+		// Sort by angle so same-category dots cluster in the same wedge of the star.
+		candidates.sort((a, b) => Math.atan2(a[1] - cy, a[0] - cx) - Math.atan2(b[1] - cy, b[0] - cx));
+
+		// Pick N evenly from the candidates.
+		const step = candidates.length / N;
+		const targets = Array.from({ length: N }, (_, i) =>
+			candidates[Math.min(Math.floor(i * step), candidates.length - 1)] ?? [cx, cy]
+		);
+
+		// Sort presets by category to match angular order.
+		const sorted = [...presetNames].sort((a, b) =>
+			presets[a].category.localeCompare(presets[b].category)
+		);
+
+		nodes = sorted.map((name, i) => {
+			const [tx, ty] = targets[i];
+			const x = cx + (Math.random() - 0.5) * R_outer * 0.4;
+			const y = cy + (Math.random() - 0.5) * R_outer * 0.4;
+			return { name, category: presets[name].category, x, y, vx: 0, vy: 0, r: 4, tx, ty };
+		});
+
+		edges = [];
+		for (let i = 0; i < nodes.length - 1; i++) {
+			if (nodes[i].category === nodes[i + 1].category) edges.push([i, i + 1]);
+		}
+
+		draw();
 	}
 
 	function step() {
 		raf = requestAnimationFrame(step);
 		if (!active) return;
 
-		const REPEL_SAME = 500; // light push within a category
-		const REPEL_DIFF = 2200; // strong push between categories → clusters separate
-		const SPRING_K = 0.008; // very soft pull within categories
-		const REST = 130; // ideal spring length within a category
-		const CENTER_PULL = 0.004; // strong gravity → compact overall layout
-		const DAMP = 0.86;
+		// Pure spring-to-slot — no repulsion, always settles.
+		const TARGET_K = 0.06;
+		const DAMP = 0.85;
 
-		for (let i = 0; i < nodes.length; i++) {
-			const a = nodes[i];
-			if (i === dragging) continue;
-
-			// Centre gravity
-			a.vx += (bounds.w / 2 - a.x) * CENTER_PULL;
-			a.vy += (bounds.h / 2 - a.y) * CENTER_PULL;
-
-			// Repulsion from every other node
-			for (let j = 0; j < nodes.length; j++) {
-				if (j === i) continue;
-				const b = nodes[j];
-				const dx = a.x - b.x;
-				const dy = a.y - b.y;
-				const d2 = dx * dx + dy * dy + 1;
-				const repel = a.category === b.category ? REPEL_SAME : REPEL_DIFF;
-				const f = repel / d2;
-				const d = Math.sqrt(d2);
-				a.vx += (dx / d) * f;
-				a.vy += (dy / d) * f;
-			}
-		}
-
-		// Springs (category bonds)
-		for (const [i, j] of edges) {
-			const a = nodes[i];
-			const b = nodes[j];
-			const dx = b.x - a.x;
-			const dy = b.y - a.y;
-			const d = Math.hypot(dx, dy) || 1;
-			const force = (d - REST) * SPRING_K;
-			const fx = (dx / d) * force;
-			const fy = (dy / d) * force;
-			if (i !== dragging) {
-				a.vx += fx;
-				a.vy += fy;
-			}
-			if (j !== dragging) {
-				b.vx -= fx;
-				b.vy -= fy;
-			}
-		}
-
-		// Integrate + damp + clamp to bounds
 		for (let i = 0; i < nodes.length; i++) {
 			if (i === dragging) continue;
 			const n = nodes[i];
-			n.vx *= DAMP;
-			n.vy *= DAMP;
+			n.vx = (n.vx + (n.tx - n.x) * TARGET_K) * DAMP;
+			n.vy = (n.vy + (n.ty - n.y) * TARGET_K) * DAMP;
 			n.x += n.vx;
 			n.y += n.vy;
-			const pad = n.r + 4;
-			if (n.x < pad) {
-				n.x = pad;
-				n.vx *= -0.3;
-			}
-			if (n.x > bounds.w - pad) {
-				n.x = bounds.w - pad;
-				n.vx *= -0.3;
-			}
-			if (n.y < pad) {
-				n.y = pad;
-				n.vy *= -0.3;
-			}
-			if (n.y > bounds.h - pad) {
-				n.y = bounds.h - pad;
-				n.vy *= -0.3;
-			}
 		}
 
-		// Reassign so Svelte sees the change. The array's mutated in place;
-		// reassign the ref to trigger reactivity.
-		nodes = nodes;
+		draw();
+
+		if (dragging === null) {
+			let maxV = 0;
+			for (const n of nodes) maxV = Math.max(maxV, n.vx * n.vx + n.vy * n.vy);
+			if (maxV < 0.04) {
+				cancelAnimationFrame(raf);
+				raf = 0;
+			}
+		}
 	}
 
 	function load(name: string) {
 		audio.loadPatch(presets[name].patch, 'editor');
 	}
 
-	function onPointerDown(e: PointerEvent, i: number) {
-		// Don't let the click bubble to the backdrop and close the drawer.
+	function getPos(e: PointerEvent) {
+		const r = canvas.getBoundingClientRect();
+		return { x: e.clientX - r.left, y: e.clientY - r.top };
+	}
+
+	function hitTest(x: number, y: number): number | null {
+		// Slightly enlarged hit radius for small dots
+		for (let i = nodes.length - 1; i >= 0; i--) {
+			const n = nodes[i];
+			if ((x - n.x) ** 2 + (y - n.y) ** 2 <= (n.r + 4) ** 2) return i;
+		}
+		return null;
+	}
+
+	function onCanvasMove(e: PointerEvent) {
+		const { x, y } = getPos(e);
+		if (dragging !== null) {
+			nodes[dragging].x = x - dragOffset.x;
+			nodes[dragging].y = y - dragOffset.y;
+			nodes[dragging].vx = 0;
+			nodes[dragging].vy = 0;
+			draw();
+			return;
+		}
+		const hit = hitTest(x, y);
+		if (hit !== hover) {
+			hover = hit;
+			if (hit !== null) preview(nodes[hit].name);
+			draw();
+		}
+	}
+
+	function onCanvasDown(e: PointerEvent) {
 		e.stopPropagation();
-		dragging = i;
-		const r = container.getBoundingClientRect();
-		dragOffset.x = e.clientX - r.left - nodes[i].x;
-		dragOffset.y = e.clientY - r.top - nodes[i].y;
-		(e.currentTarget as Element).setPointerCapture(e.pointerId);
+		const { x, y } = getPos(e);
+		const hit = hitTest(x, y);
+		if (hit !== null) {
+			dragging = hit;
+			dragOffset = { x: x - nodes[hit].x, y: y - nodes[hit].y };
+			canvas.setPointerCapture(e.pointerId);
+			if (!raf) raf = requestAnimationFrame(step);
+		}
 	}
 
-	function onPointerMove(e: PointerEvent, i: number) {
-		if (dragging !== i) return;
-		const r = container.getBoundingClientRect();
-		nodes[i].x = e.clientX - r.left - dragOffset.x;
-		nodes[i].y = e.clientY - r.top - dragOffset.y;
-		nodes[i].vx = 0;
-		nodes[i].vy = 0;
+	function onCanvasUp(e: PointerEvent) {
+		if (dragging !== null) {
+			const moved = Math.hypot(e.movementX, e.movementY);
+			if (moved < 2) load(nodes[dragging].name);
+			dragging = null;
+			if (!raf) raf = requestAnimationFrame(step);
+		}
 	}
 
-	function onPointerUp(e: PointerEvent, i: number, name: string) {
-		// Distinguish a click from a drag: tiny movement → load.
-		const moved = Math.hypot(e.movementX, e.movementY);
-		if (dragging === i && moved < 2) load(name);
-		dragging = null;
+	$effect(() => { if (!active) focused = null; });
+
+	function navigate(dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown') {
+		if (nodes.length === 0) return;
+		if (focused === null) {
+			focused = 0;
+			preview(nodes[0].name);
+			draw();
+			return;
+		}
+		const cur = nodes[focused];
+		let best: number | null = null;
+		let bestScore = Infinity;
+		for (let i = 0; i < nodes.length; i++) {
+			if (i === focused) continue;
+			const dx = nodes[i].x - cur.x;
+			const dy = nodes[i].y - cur.y;
+			const dist = Math.hypot(dx, dy);
+			let qualifies = false, score = 0;
+			if (dir === 'ArrowRight' && dx > 0) { qualifies = true; score = dist + Math.abs(dy) * 1.5; }
+			if (dir === 'ArrowLeft'  && dx < 0) { qualifies = true; score = dist + Math.abs(dy) * 1.5; }
+			if (dir === 'ArrowDown'  && dy > 0) { qualifies = true; score = dist + Math.abs(dx) * 1.5; }
+			if (dir === 'ArrowUp'    && dy < 0) { qualifies = true; score = dist + Math.abs(dx) * 1.5; }
+			if (qualifies && score < bestScore) { bestScore = score; best = i; }
+		}
+		if (best !== null) { focused = best; preview(nodes[best].name); draw(); }
+	}
+
+	function onKeyDown(e: KeyboardEvent) {
+		if (!active) return;
+		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+			e.preventDefault();
+			navigate(e.key);
+		}
+		if ((e.key === 'Enter' || e.key === ' ') && focused !== null) {
+			e.preventDefault();
+			load(nodes[focused].name);
+		}
 	}
 
 	onMount(() => {
 		init();
-		const ro = new ResizeObserver(() => {
-			const r = container.getBoundingClientRect();
-			bounds = { w: r.width, h: r.height };
-		});
-		ro.observe(container);
 		raf = requestAnimationFrame(step);
+		const ro = new ResizeObserver(() => init());
+		ro.observe(container);
 		return () => {
 			cancelAnimationFrame(raf);
 			ro.disconnect();
+			clearTimeout(previewTimer);
+			audio.releaseAll();
 		};
 	});
 </script>
 
+<svelte:window onkeydown={onKeyDown} />
+
 <div bind:this={container} class="absolute inset-0 overflow-hidden" role="presentation">
-	<!-- Edges (drawn first so nodes paint over them). Each line uses the
-	     category color so groups are visually identifiable; lit edges
-	     get brighter and thicker on hover. -->
-	<svg class="pointer-events-none absolute inset-0 h-full w-full">
-		{#each edges as [i, j] (i + '-' + j)}
-			{@const a = nodes[i]}
-			{@const b = nodes[j]}
-			{@const lit = hover === i || hover === j}
-			{#if a && b && lit}
-				<line
-					x1={a.x}
-					y1={a.y}
-					x2={b.x}
-					y2={b.y}
-					stroke={categoryColor[a.category]}
-					stroke-width="1.25"
-					stroke-opacity="0.55"
-				/>
-			{/if}
-		{/each}
-	</svg>
+	<canvas
+		bind:this={canvas}
+		class="absolute inset-0"
+		style:cursor={dragging !== null ? 'grabbing' : hover !== null ? 'grab' : 'default'}
+		onpointermove={onCanvasMove}
+		onpointerdown={onCanvasDown}
+		onpointerup={onCanvasUp}
+		onpointerleave={() => { hover = null; draw(); }}
+	/>
 
-	<!-- Nodes. When hovering, same-category nodes stay bright; others dim. -->
-	{#each nodes as n, i (n.name)}
-		{@const related = hover === null || hover === i || nodes[hover]?.category === n.category}
-		<button
-			class="absolute flex items-center justify-center rounded-full border-2 transition-[transform,opacity,box-shadow] duration-150 hover:scale-110 active:scale-95"
-			style:left="{n.x - n.r}px"
-			style:top="{n.y - n.r}px"
-			style:width="{n.r * 2}px"
-			style:height="{n.r * 2}px"
-			style:background-color={categoryColor[n.category]}
-			style:border-color="var(--ctp-base)"
-			style:cursor={dragging === i ? 'grabbing' : 'grab'}
-			style:touch-action="none"
-			style:opacity={related ? 1 : 0.25}
-			style:box-shadow={hover === i
-				? `0 0 0 4px ${categoryColor[n.category]}55, 0 0 24px ${categoryColor[n.category]}99`
-				: 'none'}
-			onpointerdown={(e) => onPointerDown(e, i)}
-			onpointermove={(e) => onPointerMove(e, i)}
-			onpointerup={(e) => onPointerUp(e, i, n.name)}
-			onclick={(e) => e.stopPropagation()}
-			onpointerenter={() => (hover = i)}
-			onpointerleave={() => (hover = null)}
-			aria-label="load preset {n.name}"
+	{#if hover !== null || focused !== null}
+		{@const n = nodes[(hover ?? focused)!]}
+		<div
+			class="pointer-events-none absolute z-10 -translate-x-1/2 rounded bg-crust px-2 py-0.5 text-[10px] tracking-wide text-text shadow-lg"
+			style:left="{n.x}px"
+			style:top="{n.y - n.r - 18}px"
 		>
-			<span class="sr-only">{n.name}</span>
-		</button>
-
-		{#if hover === i}
-			<div
-				class="pointer-events-none absolute z-10 -translate-x-1/2 rounded bg-crust px-2 py-0.5 text-[10px] tracking-wide text-text shadow-lg"
-				style:left="{n.x}px"
-				style:top="{n.y - n.r - 18}px"
-			>
-				{n.name}
-				<span class="ml-1 text-overlay1">·</span>
-				<span class="ml-1 text-overlay1">{n.category}</span>
-			</div>
-		{/if}
-	{/each}
+			{n.name}
+			<span class="ml-1 text-overlay1">·</span>
+			<span class="ml-1 text-overlay1">{n.category}</span>
+		</div>
+	{/if}
 </div>
