@@ -24,6 +24,11 @@ export type ModTarget = {
 	/** Parameter min/max in its own units. Used to clamp + size the ring arc. */
 	min: number;
 	max: number;
+	/**
+	 * Knob curve exponent (matches Knob.svelte's `curve`). Modulation happens
+	 * in *knob space* so it feels consistent across the knob travel.
+	 */
+	curve?: number;
 	/** Read the user's base value (un-modulated, from patch state). */
 	getBase(): number;
 	/** Apply a fully-resolved (already clamped) value to the audio graph. */

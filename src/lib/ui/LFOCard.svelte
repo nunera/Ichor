@@ -136,8 +136,8 @@
 								<input
 									type="range"
 									min="0"
-									max={range / 2}
-									step={range / 400}
+									max="0.5"
+									step="0.005"
 									value={Math.abs(r.amount)}
 									oninput={(e) =>
 										audio.updateRoute(which, r.target, {

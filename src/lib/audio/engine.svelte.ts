@@ -590,9 +590,11 @@ class AudioEngine {
 	}
 
 	#applyFilter(p: Partial<Filter>) {
-		if (p.type !== undefined) this.#filter!.type = p.type as BiquadFilterType;
+		// loadPatch can be called before audio.start(); guard null graph nodes.
+		if (!this.#filter) return;
+		if (p.type !== undefined) this.#filter.type = p.type as BiquadFilterType;
 		if (p.cutoff !== undefined) this.#cutoffSignal?.rampTo(p.cutoff, 0.02);
-		if (p.resonance !== undefined) this.#filter?.Q.rampTo(p.resonance, 0.02);
+		if (p.resonance !== undefined) this.#filter.Q.rampTo(p.resonance, 0.02);
 	}
 
 	#applyLFOOne(which: 'lfo1' | 'lfo2', p: Partial<LFO>) {
@@ -657,11 +659,10 @@ class AudioEngine {
 		if (lfo.routes.some((r) => r.target === target)) return;
 		const t = modTargets.get(target);
 		if (!t) return;
-		// Default amount = 25% of target's range, offset = 0. Sensible starting
-		// point so the user immediately hears something.
-		const range = t.max - t.min;
-		const amount = range * 0.25;
-		const next = [...lfo.routes, { target, amount, offset: 0 }];
+		// Default amount is in knob-space (0..0.5). 0.15 is noticeable but not
+		// full-range chaos.
+		const amount = 0.15;
+		const next = [...lfo.routes, { target, amount }];
 		this.setLFO1Routes(which, next, source);
 	}
 
@@ -843,6 +844,15 @@ class AudioEngine {
 			delay: { ...next.effects.delay },
 			reverb: { ...next.effects.reverb }
 		};
+
+		// If the audio graph hasn't been constructed yet (audio.start() not
+		// called), we still want the patch state to update so the UI/editor
+		// reflects the preset, but we must not touch Tone nodes.
+		if (!this.started) {
+			this.#emit({ source, section: 'all', value: next });
+			return;
+		}
+
 		this.#applyOscSettings();
 		this.#applyEnvelope();
 		this.#applyFilter(this.patch.filter);
@@ -1109,6 +1119,7 @@ class AudioEngine {
 			group: 'filter',
 			min: 20,
 			max: 20000,
+			curve: 3,
 			getBase: () => this.patch.filter.cutoff,
 			apply: (v) => this.#cutoffSignal?.rampTo(v, 0.01)
 		});
@@ -1358,7 +1369,15 @@ class AudioEngine {
 			const t = modTargets.get(id);
 			if (!t) continue;
 			const base = t.getBase();
-			const eff = Math.max(t.min, Math.min(t.max, base + amount));
+			const curve = t.curve ?? 1;
+			const span = t.max - t.min;
+			if (span <= 0) continue;
+			// Convert base to knob-space norm, apply LFO in knob-space, convert back.
+			const baseNormLinear = (base - t.min) / span;
+			const baseNorm = curve === 1 ? baseNormLinear : Math.pow(baseNormLinear, 1 / curve);
+			const nextNorm = Math.max(0, Math.min(1, baseNorm + amount));
+			const effNorm = curve === 1 ? nextNorm : Math.pow(nextNorm, curve);
+			const eff = t.min + effNorm * span;
 			t.apply(eff);
 			liveMod.set(id, eff);
 		}

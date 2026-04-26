@@ -73,7 +73,11 @@ export type Filter = z.infer<typeof FilterSchema>;
  */
 export const ModRouteSchema = z.object({
 	target: z.string().min(1),
-	amount: z.number().default(0)
+	/**
+	 * Modulation amount in knob-space (0..0.5). 0.5 means the LFO can sweep
+	 * across the entire knob travel (subject to clamping).
+	 */
+	amount: z.number().min(0).max(0.5).default(0)
 });
 export type ModRoute = z.infer<typeof ModRouteSchema>;
 
@@ -214,7 +218,9 @@ function migrateLegacyLfo(raw: unknown): unknown {
 	const depth = typeof old.depth === 'number' ? old.depth : 0;
 	const existingRoutes = Array.isArray(old.routes) ? (old.routes as unknown[]) : [];
 	const routes =
-		existingRoutes.length > 0 ? existingRoutes : [{ target: 'filter.cutoff', amount: depth }];
+		existingRoutes.length > 0
+			? existingRoutes
+			: [{ target: 'filter.cutoff', amount: Math.min(0.5, depth / 10000) }];
 	const lfo1 = { ...old, routes };
 	const lfo2 = { rate: 4, depth: 0, enabled: false, shape: 'sine', routes: [] };
 	const { lfo: _drop, ...rest } = r;
@@ -307,7 +313,7 @@ export const defaultPatch: Patch = {
 		depth: 1500,
 		enabled: false,
 		shape: 'sine',
-		routes: [{ target: 'filter.cutoff', amount: 1500 }]
+		routes: [{ target: 'filter.cutoff', amount: 0.15 }]
 	},
 	lfo2: { rate: 2, depth: 0, enabled: false, shape: 'triangle', routes: [] },
 	sub: { level: -6, octave: -1, enabled: false, type: 'sine', pan: 0 },

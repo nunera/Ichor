@@ -116,9 +116,9 @@
 		return START + valueToNorm(v) * ARC;
 	}
 
-	const ringCenterAngle = $derived(valueToAngle(value));
-	const ringMinAngle = $derived(valueToAngle(value - totalAmount));
-	const ringMaxAngle = $derived(valueToAngle(value + totalAmount));
+	const ringCenterAngle = $derived(START + norm * ARC);
+	const ringMinAngle = $derived(START + clamp(norm - totalAmount, 0, 1) * ARC);
+	const ringMaxAngle = $derived(START + clamp(norm + totalAmount, 0, 1) * ARC);
 	const ringStart = $derived(polar(ringMinAngle, rRing));
 	const ringEnd = $derived(polar(ringMaxAngle, rRing));
 	const ringLargeArc = $derived(Math.abs(ringMaxAngle - ringMinAngle) > 180 ? 1 : 0);
