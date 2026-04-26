@@ -8,15 +8,30 @@
 	const H = 40;
 	const CYCLES = 3;
 
+	function waveAt(phase: number, shape: string): number {
+		// phase scaled so that integer steps = full cycles
+		const p = phase - Math.floor(phase);
+		switch (shape) {
+			case 'square':
+				return p < 0.5 ? 1 : -1;
+			case 'triangle':
+				return p < 0.5 ? -1 + 4 * p : 3 - 4 * p;
+			case 'sawtooth':
+				return 2 * p - 1;
+			case 'sine':
+			default:
+				return Math.sin(p * 2 * Math.PI);
+		}
+	}
+
 	const path = $derived.by(() => {
-		const N = 120;
+		const N = 240;
 		const pts: string[] = [];
-		// Map depth (0..6000 Hz) to a 0..1 amplitude factor for visual scale.
 		const amp = lfo.enabled ? Math.min(1, lfo.depth / 3000) : 0.05;
 		for (let i = 0; i < N; i++) {
 			const t = i / (N - 1);
 			const x = t * W;
-			const y = H / 2 - Math.sin(t * CYCLES * 2 * Math.PI) * (H / 2 - 4) * amp;
+			const y = H / 2 - waveAt(t * CYCLES, lfo.shape) * (H / 2 - 4) * amp;
 			pts.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`);
 		}
 		return pts.join(' ');

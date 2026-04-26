@@ -5,11 +5,16 @@
 	const s = $derived(audio.patch.sub);
 
 	const waves = ['sine', 'triangle', 'square', 'sawtooth'] as const;
-	const waveLabels: Record<string, string> = { sine: '∿', triangle: '△', square: '⊓', sawtooth: '⊿' };
+	const waveLabels: Record<string, string> = {
+		sine: '∿',
+		triangle: '△',
+		square: '⊓',
+		sawtooth: '⊿'
+	};
 </script>
 
 <section
-	class="flex min-h-0 flex-col gap-2 rounded-lg border border-surface0 bg-mantle/60 p-3"
+	class="flex h-full min-h-0 flex-col gap-2 rounded-lg border border-surface0 bg-mantle/60 p-3"
 	class:opacity-50={!s.enabled}
 >
 	<header class="flex items-center gap-2">
@@ -33,8 +38,8 @@
 				class:bg-surface0={s.type !== w}
 				class:text-overlay1={s.type !== w}
 				onclick={() => audio.setSub({ type: w })}
-				title={w}
-			>{waveLabels[w]}</button>
+				title={w}>{waveLabels[w]}</button
+			>
 		{/each}
 	</div>
 
@@ -66,7 +71,8 @@
 			max={1}
 			step={0.01}
 			size={26}
-			format={(v) => (v === 0 ? 'C' : v > 0 ? `R${Math.round(v * 100)}` : `L${Math.round(-v * 100)}`)}
+			format={(v) =>
+				v === 0 ? 'C' : v > 0 ? `R${Math.round(v * 100)}` : `L${Math.round(-v * 100)}`}
 			onchange={(v) => audio.setSub({ pan: v })}
 		/>
 	</div>

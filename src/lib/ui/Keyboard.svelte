@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { audio } from '$lib/audio/engine.svelte';
+	import { keyboardState } from './keyboard.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	type Props = { octaves?: number };
-	let { octaves = 3 }: Props = $props();
+	let { octaves = 2 }: Props = $props();
 
 	// 12-note row mapped to home-row + qwerty-top-row keybinds. Repeats one
 	// octave higher for an upper row of bindings, so two octaves are playable
@@ -28,14 +29,14 @@
 	// Upper row: C..B at octaveBase+1
 	const UPPER_BIND = ['k', 'o', 'l', 'p', ';', "'", ']', '\\', '', '', '', ''];
 
-	let octaveBase = $state(3); // C3 row + C4 row by default
+	const octaveBase = $derived(keyboardState.octaveBase);
 
 	type Key = { note: string; midi: number; key: string; black: boolean; white: number };
 
 	const keys = $derived.by<Key[]>(() => {
 		const out: Key[] = [];
 		for (let o = 0; o < octaves; o++) {
-			const oct = (octaveBase ?? 3) + o; // visible octave number
+			const oct = octaveBase + o; // visible octave number
 			for (let i = 0; i < 12; i++) {
 				const pc = PITCH_CLASSES[i];
 				const note = `${pc.name}${oct}`;
@@ -110,11 +111,7 @@
 		// Release whatever is currently held by the keyboard binding before
 		// shifting, so we never strand a sustaining note.
 		panic();
-		octaveBase = clamp(octaveBase + delta, 0, 8);
-	}
-
-	function clamp(v: number, lo: number, hi: number) {
-		return Math.max(lo, Math.min(hi, v));
+		keyboardState.shift(delta);
 	}
 
 	function isTextTarget(t: EventTarget | null): boolean {
@@ -145,7 +142,10 @@
 	}
 
 	function onKeyUp(e: KeyboardEvent) {
-		if (isTextTarget(e.target)) return;
+		// Don't gate keyup on isTextTarget — if the user clicks a checkbox or
+		// input while holding a key, focus moves to that element and the keyup
+		// would otherwise be ignored, leaving the note stuck. We always want
+		// to process keyup for any binding we know about.
 		const k = keys.find((x) => x.key === e.key.toLowerCase());
 		if (k) release(k.note);
 	}
@@ -168,30 +168,9 @@
 	onvisibilitychange={onVisibility}
 />
 
-<div class="flex flex-col gap-2">
-	<div class="flex items-center gap-2 text-xs text-subtext0">
-		<button
-			class="rounded border border-surface1 bg-surface0 px-2 py-1 text-text hover:bg-surface1"
-			onclick={() => shift(-1)}
-			aria-label="octave down"
-		>
-			−
-		</button>
-		<span class="tabular-nums">
-			C{octaveBase} – B{octaveBase + octaves - 1}
-		</span>
-		<button
-			class="rounded border border-surface1 bg-surface0 px-2 py-1 text-text hover:bg-surface1"
-			onclick={() => shift(+1)}
-			aria-label="octave up"
-		>
-			+
-		</button>
-		<span class="ml-2 text-overlay1"> z / x to shift </span>
-	</div>
-
+<div class="flex h-full flex-col">
 	<div
-		class="relative flex h-32 w-full touch-none select-none"
+		class="relative flex h-full w-full touch-none select-none"
 		onpointerdown={onPointerDown}
 		onpointermove={onPointerMove}
 		onpointerup={onPointerUp}

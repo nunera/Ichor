@@ -34,7 +34,9 @@
 		if (!audio.started) return;
 		clearTimeout(previewTimer);
 		audio.releaseAll();
-		audio.loadPatch(presets[name].patch, 'editor');
+		// 'preview' source isn't broadcast over the websocket, so hovering presets
+		// in a multiplayer session doesn't spam co-listeners with patch changes.
+		audio.loadPatch(presets[name].patch, 'preview');
 		audio.attack('A3');
 		previewTimer = window.setTimeout(() => audio.release('A3'), 700);
 	}
@@ -67,7 +69,7 @@
 			const isHov = hover === i;
 			const isFoc = focused === i;
 			const related = pivot === null || pivot === i || nodes[pivot]?.category === n.category;
-			const r = (isHov || isFoc) ? n.r * 1.2 : n.r;
+			const r = isHov || isFoc ? n.r * 1.2 : n.r;
 
 			if (isHov) {
 				ctx.globalAlpha = 0.35;
@@ -124,10 +126,11 @@
 			let inside = false;
 			const n = starVerts.length - 1;
 			for (let i = 0, j = n - 1; i < n; j = i++) {
-				const xi = starVerts[i][0], yi = starVerts[i][1];
-				const xj = starVerts[j][0], yj = starVerts[j][1];
-				if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi)
-					inside = !inside;
+				const xi = starVerts[i][0],
+					yi = starVerts[i][1];
+				const xj = starVerts[j][0],
+					yj = starVerts[j][1];
+				if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
 			}
 			return inside;
 		}
@@ -149,8 +152,9 @@
 
 		// Pick N evenly from the candidates.
 		const step = candidates.length / N;
-		const targets = Array.from({ length: N }, (_, i) =>
-			candidates[Math.min(Math.floor(i * step), candidates.length - 1)] ?? [cx, cy]
+		const targets = Array.from(
+			{ length: N },
+			(_, i) => candidates[Math.min(Math.floor(i * step), candidates.length - 1)] ?? [cx, cy]
 		);
 
 		// Sort presets by category to match angular order.
@@ -173,19 +177,82 @@
 		draw();
 	}
 
+	// --- Spatial hash for O(N) neighbor lookups (vs naive O(N²)) -----------
+	// At 300+ nodes the all-pairs check becomes the frame bottleneck. By
+	// bucketing nodes into a coarse grid and only repelling against cells
+	// in our 3×3 neighborhood, we keep physics smooth at hundreds of nodes.
+	const CELL = 24; // px; ~ 2× node radius — bigger = fewer buckets but more pairs per bucket
+	const grid = new Map<number, number[]>();
+	function cellKey(x: number, y: number): number {
+		return ((Math.floor(x / CELL) | 0) << 16) ^ (Math.floor(y / CELL) | 0);
+	}
+	function rebuildGrid() {
+		grid.clear();
+		for (let i = 0; i < nodes.length; i++) {
+			const k = cellKey(nodes[i].x, nodes[i].y);
+			let bucket = grid.get(k);
+			if (!bucket) {
+				bucket = [];
+				grid.set(k, bucket);
+			}
+			bucket.push(i);
+		}
+	}
+
 	function step() {
 		raf = requestAnimationFrame(step);
 		if (!active) return;
 
-		// Pure spring-to-slot — no repulsion, always settles.
 		const TARGET_K = 0.06;
 		const DAMP = 0.85;
+		const REPEL = 28; // strength per overlap (lower = looser pack)
+		const REPEL_R = 14; // px — repulsion radius (must be < CELL)
+		const REPEL_R2 = REPEL_R * REPEL_R;
 
+		// 1. Spring back to assigned star slot
 		for (let i = 0; i < nodes.length; i++) {
 			if (i === dragging) continue;
 			const n = nodes[i];
-			n.vx = (n.vx + (n.tx - n.x) * TARGET_K) * DAMP;
-			n.vy = (n.vy + (n.ty - n.y) * TARGET_K) * DAMP;
+			n.vx += (n.tx - n.x) * TARGET_K;
+			n.vy += (n.ty - n.y) * TARGET_K;
+		}
+
+		// 2. Pairwise repulsion via spatial hash (3×3 cell neighborhood)
+		rebuildGrid();
+		for (let i = 0; i < nodes.length; i++) {
+			const a = nodes[i];
+			const cx = Math.floor(a.x / CELL) | 0;
+			const cy = Math.floor(a.y / CELL) | 0;
+			for (let oy = -1; oy <= 1; oy++) {
+				for (let ox = -1; ox <= 1; ox++) {
+					const bucket = grid.get(((cx + ox) << 16) ^ (cy + oy));
+					if (!bucket) continue;
+					for (const j of bucket) {
+						if (j <= i) continue; // each pair handled once
+						const b = nodes[j];
+						const dx = a.x - b.x;
+						const dy = a.y - b.y;
+						const d2 = dx * dx + dy * dy;
+						if (d2 >= REPEL_R2 || d2 === 0) continue;
+						const d = Math.sqrt(d2);
+						const force = ((REPEL_R - d) / d) * REPEL * 0.04;
+						const fx = dx * force;
+						const fy = dy * force;
+						a.vx += fx;
+						a.vy += fy;
+						b.vx -= fx;
+						b.vy -= fy;
+					}
+				}
+			}
+		}
+
+		// 3. Integrate + damping
+		for (let i = 0; i < nodes.length; i++) {
+			if (i === dragging) continue;
+			const n = nodes[i];
+			n.vx *= DAMP;
+			n.vy *= DAMP;
 			n.x += n.vx;
 			n.y += n.vy;
 		}
@@ -194,7 +261,10 @@
 
 		if (dragging === null) {
 			let maxV = 0;
-			for (const n of nodes) maxV = Math.max(maxV, n.vx * n.vx + n.vy * n.vy);
+			for (const n of nodes) {
+				const v2 = n.vx * n.vx + n.vy * n.vy;
+				if (v2 > maxV) maxV = v2;
+			}
 			if (maxV < 0.04) {
 				cancelAnimationFrame(raf);
 				raf = 0;
@@ -259,7 +329,9 @@
 		}
 	}
 
-	$effect(() => { if (!active) focused = null; });
+	$effect(() => {
+		if (!active) focused = null;
+	});
 
 	function navigate(dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown') {
 		if (nodes.length === 0) return;
@@ -277,19 +349,44 @@
 			const dx = nodes[i].x - cur.x;
 			const dy = nodes[i].y - cur.y;
 			const dist = Math.hypot(dx, dy);
-			let qualifies = false, score = 0;
-			if (dir === 'ArrowRight' && dx > 0) { qualifies = true; score = dist + Math.abs(dy) * 1.5; }
-			if (dir === 'ArrowLeft'  && dx < 0) { qualifies = true; score = dist + Math.abs(dy) * 1.5; }
-			if (dir === 'ArrowDown'  && dy > 0) { qualifies = true; score = dist + Math.abs(dx) * 1.5; }
-			if (dir === 'ArrowUp'    && dy < 0) { qualifies = true; score = dist + Math.abs(dx) * 1.5; }
-			if (qualifies && score < bestScore) { bestScore = score; best = i; }
+			let qualifies = false,
+				score = 0;
+			if (dir === 'ArrowRight' && dx > 0) {
+				qualifies = true;
+				score = dist + Math.abs(dy) * 1.5;
+			}
+			if (dir === 'ArrowLeft' && dx < 0) {
+				qualifies = true;
+				score = dist + Math.abs(dy) * 1.5;
+			}
+			if (dir === 'ArrowDown' && dy > 0) {
+				qualifies = true;
+				score = dist + Math.abs(dx) * 1.5;
+			}
+			if (dir === 'ArrowUp' && dy < 0) {
+				qualifies = true;
+				score = dist + Math.abs(dx) * 1.5;
+			}
+			if (qualifies && score < bestScore) {
+				bestScore = score;
+				best = i;
+			}
 		}
-		if (best !== null) { focused = best; preview(nodes[best].name); draw(); }
+		if (best !== null) {
+			focused = best;
+			preview(nodes[best].name);
+			draw();
+		}
 	}
 
 	function onKeyDown(e: KeyboardEvent) {
 		if (!active) return;
-		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+		if (
+			e.key === 'ArrowLeft' ||
+			e.key === 'ArrowRight' ||
+			e.key === 'ArrowUp' ||
+			e.key === 'ArrowDown'
+		) {
 			e.preventDefault();
 			navigate(e.key);
 		}
@@ -323,7 +420,10 @@
 		onpointermove={onCanvasMove}
 		onpointerdown={onCanvasDown}
 		onpointerup={onCanvasUp}
-		onpointerleave={() => { hover = null; draw(); }}
+		onpointerleave={() => {
+			hover = null;
+			draw();
+		}}
 	/>
 
 	{#if hover !== null || focused !== null}

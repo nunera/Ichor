@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { audio } from '$lib/audio/engine.svelte';
 	import Keyboard from '$lib/ui/Keyboard.svelte';
+	import Wheels from '$lib/ui/Wheels.svelte';
+	import Voicing from '$lib/ui/Voicing.svelte';
 	import SoundDesign from '$lib/ui/SoundDesign.svelte';
+	import { keyboardState } from '$lib/ui/keyboard.svelte';
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
 	import Visualizer from '$lib/ui/Visualizer.svelte';
 	import PatchEditor from '$lib/ui/PatchEditor.svelte';
@@ -36,7 +39,12 @@
 
 		<div class="relative flex items-end gap-4">
 			<div>
-				<h1 class="text-2xl tracking-[0.15em] text-text border border-mauve/60 bg-base px-3 py-1" style="font-family: 'Oxanium', sans-serif; font-weight: 300;">ICHOR</h1>
+				<h1
+					class="border border-mauve/60 bg-base px-3 py-1 text-2xl tracking-[0.15em] text-text"
+					style="font-family: 'Oxanium', sans-serif; font-weight: 300;"
+				>
+					ICHOR
+				</h1>
 				<p class="text-xs text-subtext0">layer 1 — sound design</p>
 			</div>
 
@@ -89,13 +97,48 @@
 			<SoundDesign />
 		</div>
 
-		<Keyboard octaves={3} />
+		<!-- Performance row: pitch/mod wheels | keyboard | voicing.
+		     Wheels and Voicing share the keyboard's height (h-32) so they all bottom-align. -->
+		<div class="flex items-end gap-3">
+			<div class="h-32 shrink-0">
+				<Wheels />
+			</div>
+			<div class="h-32 min-w-0 flex-1">
+				<Keyboard octaves={2} />
+			</div>
+			<div class="h-32 w-32 shrink-0">
+				<Voicing />
+			</div>
+		</div>
 
-		<footer class="text-[10px] text-overlay1">
-			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">a–j</kbd> /
-			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">k–'</kbd> play notes ·
-			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">z</kbd>
-			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">x</kbd> shift octave
+		<!-- Footer row: octave shifter inline with the keybind hints. -->
+		<footer class="flex items-center gap-3 text-[10px] text-overlay1">
+			<div class="flex items-center gap-1.5 text-subtext0">
+				<button
+					class="rounded border border-surface1 bg-surface0 px-2 py-0.5 text-text hover:bg-surface1"
+					onclick={() => keyboardState.shift(-1)}
+					aria-label="octave down"
+				>
+					−
+				</button>
+				<span class="text-text tabular-nums">
+					C{keyboardState.octaveBase} – B{keyboardState.octaveBase + 1}
+				</span>
+				<button
+					class="rounded border border-surface1 bg-surface0 px-2 py-0.5 text-text hover:bg-surface1"
+					onclick={() => keyboardState.shift(+1)}
+					aria-label="octave up"
+				>
+					+
+				</button>
+			</div>
+
+			<span>
+				<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">a–j</kbd> /
+				<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">k–'</kbd> play notes ·
+				<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">z</kbd>
+				<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">x</kbd> shift octave
+			</span>
 		</footer>
 	</div>
 </main>

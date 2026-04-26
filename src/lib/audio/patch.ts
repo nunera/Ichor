@@ -156,12 +156,31 @@ export type Section = keyof typeof SectionPartials;
 /**
  * Validate a partial update for a given section. Returns the parsed value on
  * success, or throws ZodError on failure. Callers may catch and surface to UI.
+ *
+ * CRITICAL: Zod's `.default()` triggers on missing keys, so calling
+ * `partial().parse({ spread: 50 })` would inject `unison: 1, width: 0.5,
+ * type: <default>` into the result — silently clobbering sibling fields when
+ * we then `Object.assign` over the patch. We solve this by tracking which
+ * keys the caller actually provided and only returning those keys after
+ * validation. Validation still runs against the full schema so out-of-range
+ * values are properly rejected.
  */
 export function validateSection<S extends Section>(
 	section: S,
 	value: unknown
 ): z.infer<(typeof SectionPartials)[S]> {
-	return SectionPartials[section].parse(value) as z.infer<(typeof SectionPartials)[S]>;
+	const providedKeys = new Set<string>();
+	if (value && typeof value === 'object') {
+		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+			if (v !== undefined) providedKeys.add(k);
+		}
+	}
+	const parsed = SectionPartials[section].parse(value) as Record<string, unknown>;
+	const filtered: Record<string, unknown> = {};
+	for (const k of providedKeys) {
+		if (k in parsed) filtered[k] = parsed[k];
+	}
+	return filtered as z.infer<(typeof SectionPartials)[S]>;
 }
 
 /**

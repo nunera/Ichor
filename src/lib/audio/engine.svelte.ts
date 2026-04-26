@@ -21,7 +21,7 @@ export { defaultPatch } from './patch';
  * network, persistence) will subscribe to writes and ignore ones with its
  * own source tag, preventing echo loops.
  */
-export type WriteSource = 'ui' | 'remote' | 'editor' | 'midi' | 'init';
+export type WriteSource = 'ui' | 'remote' | 'editor' | 'midi' | 'init' | 'preview';
 
 export type WriteEvent =
 	| { source: WriteSource; section: 'osc1' | 'osc2'; value: Partial<OscPatch> }
@@ -40,6 +40,13 @@ class AudioEngine {
 	#osc1: Tone.PolySynth | null = null;
 	#osc2: Tone.PolySynth | null = null;
 	#sub: Tone.PolySynth | null = null;
+	// Parallel mono synths used by legato/porta/scale modes — needed because
+	// PolySynth allocates a fresh voice per triggerAttack, leaving portamento
+	// nothing to glide from. A single Tone.Synth voice glides between
+	// consecutive triggerAttacks.
+	#osc1Mono: Tone.Synth | null = null;
+	#osc2Mono: Tone.Synth | null = null;
+	#subMono: Tone.Synth | null = null;
 	#osc1Gain: Tone.Gain | null = null;
 	#osc2Gain: Tone.Gain | null = null;
 	#subGain: Tone.Gain | null = null;
@@ -47,6 +54,7 @@ class AudioEngine {
 	#noise: Tone.Noise | null = null;
 	#noiseGain: Tone.Gain | null = null;
 	#noisePan: Tone.Panner | null = null;
+	#noiseEnv: Tone.AmplitudeEnvelope | null = null;
 	#filter: Tone.Filter | null = null;
 	#cutoffSignal: Tone.Signal<'frequency'> | null = null;
 	#lfo: Tone.LFO | null = null;
@@ -54,6 +62,10 @@ class AudioEngine {
 	#fft: Tone.Analyser | null = null;
 	#held = new Set<string>();
 	#lastNote: string | null = null;
+	/** Pitch bend in cents. Range: ±200 cents (= ±2 semitones). */
+	#bendCents = 0;
+	/** Mod wheel 0..1. Scales LFO depth. */
+	#modulation = 0;
 
 	#listeners = new Set<(e: WriteEvent) => void>();
 
@@ -96,11 +108,20 @@ class AudioEngine {
 			this.patch.sub.enabled ? Tone.dbToGain(this.patch.sub.level) : 0
 		).connect(this.#subPan);
 
-		this.#noisePan = new Tone.Panner(this.patch.noise.pan).toDestination();
+		// Noise routes through the filter and gates via an AmplitudeEnvelope so
+		// it only sounds when notes are held. Without this, the noise generator
+		// would drone constantly the moment it's enabled.
+		this.#noisePan = new Tone.Panner(this.patch.noise.pan).connect(this.#filter);
 		this.#noiseGain = new Tone.Gain(
 			this.patch.noise.enabled ? Tone.dbToGain(this.patch.noise.level) : 0
 		).connect(this.#noisePan);
-		this.#noise = new Tone.Noise(this.patch.noise.type).connect(this.#noiseGain);
+		this.#noiseEnv = new Tone.AmplitudeEnvelope({
+			attack: this.patch.env.attack,
+			decay: this.patch.env.decay,
+			sustain: this.patch.env.sustain,
+			release: this.patch.env.release
+		}).connect(this.#noiseGain);
+		this.#noise = new Tone.Noise(this.patch.noise.type).connect(this.#noiseEnv);
 		this.#noise.start();
 
 		this.#osc1 = new Tone.PolySynth(Tone.Synth).connect(this.#osc1Gain);
@@ -110,6 +131,10 @@ class AudioEngine {
 			oscillator: { type: this.patch.sub.type } as any,
 			detune: this.patch.sub.octave * 1200
 		});
+		// Mono companions, sharing gain/filter routing. Routed in parallel.
+		this.#osc1Mono = new Tone.Synth().connect(this.#osc1Gain);
+		this.#osc2Mono = new Tone.Synth().connect(this.#osc2Gain);
+		this.#subMono = new Tone.Synth().connect(this.#subGain);
 
 		const d = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
 		this.#lfo = new Tone.LFO({
@@ -140,7 +165,38 @@ class AudioEngine {
 	}
 
 	#detuneCents(o: OscPatch) {
-		return o.octave * 1200 + o.semi * 100 + o.fine;
+		return o.octave * 1200 + o.semi * 100 + o.fine + this.#bendCents;
+	}
+
+	/**
+	 * Set pitch bend in semitones (typically -2..+2). Updates the live detune
+	 * on all running oscillators in real time.
+	 */
+	setPitchBend(semitones: number) {
+		this.#bendCents = semitones * 100;
+		const subDetune = this.patch.sub.octave * 1200 + this.#bendCents;
+		this.#osc1?.set({ detune: this.#detuneCents(this.patch.osc1) });
+		this.#osc2?.set({ detune: this.#detuneCents(this.patch.osc2) });
+		this.#sub?.set({ detune: subDetune });
+		if (this.#osc1Mono) this.#osc1Mono.detune.value = this.#detuneCents(this.patch.osc1);
+		if (this.#osc2Mono) this.#osc2Mono.detune.value = this.#detuneCents(this.patch.osc2);
+		if (this.#subMono) this.#subMono.detune.value = subDetune;
+	}
+
+	/**
+	 * Set modulation wheel position (0..1). Scales LFO depth on top of the
+	 * patch's depth setting, so even a disabled-depth LFO becomes audible
+	 * when the wheel is up.
+	 */
+	setModulation(amount: number) {
+		this.#modulation = Math.max(0, Math.min(1, amount));
+		if (!this.#lfo) return;
+		// Effective depth = patch depth (when LFO enabled) + mod wheel * extra
+		const base = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
+		const wheel = this.#modulation * 4000; // up to 4kHz of cutoff sweep at full mod
+		const d = base + wheel;
+		this.#lfo.min = -d;
+		this.#lfo.max = d;
 	}
 
 	/**
@@ -159,13 +215,23 @@ class AudioEngine {
 	}
 
 	#applyOscSettings() {
-		this.#osc1?.set({
-			oscillator: this.#buildOscOptions(this.patch.osc1) as any,
+		const o1 = this.#buildOscOptions(this.patch.osc1) as any;
+		const o2 = this.#buildOscOptions(this.patch.osc2) as any;
+		this.#osc1?.set({ oscillator: o1, detune: this.#detuneCents(this.patch.osc1) });
+		this.#osc2?.set({ oscillator: o2, detune: this.#detuneCents(this.patch.osc2) });
+		// Mono Tone.Synth doesn't accept fat*/pulse — fall back to base type.
+		const monoType = (osc: OscPatch) => (osc.type === 'pulse' ? 'square' : osc.type);
+		this.#osc1Mono?.set({
+			oscillator: { type: monoType(this.patch.osc1) } as any,
 			detune: this.#detuneCents(this.patch.osc1)
 		});
-		this.#osc2?.set({
-			oscillator: this.#buildOscOptions(this.patch.osc2) as any,
+		this.#osc2Mono?.set({
+			oscillator: { type: monoType(this.patch.osc2) } as any,
 			detune: this.#detuneCents(this.patch.osc2)
+		});
+		this.#subMono?.set({
+			oscillator: { type: this.patch.sub.type } as any,
+			detune: this.patch.sub.octave * 1200
 		});
 	}
 
@@ -191,6 +257,17 @@ class AudioEngine {
 		this.#osc1?.set({ envelope: env });
 		this.#osc2?.set({ envelope: env });
 		this.#sub?.set({ envelope: env });
+		this.#osc1Mono?.set({ envelope: env });
+		this.#osc2Mono?.set({ envelope: env });
+		this.#subMono?.set({ envelope: env });
+		// Noise uses a separate envelope; mirror the same AHDSR.
+		if (this.#noiseEnv) {
+			this.#noiseEnv.attack = total;
+			this.#noiseEnv.attackCurve = curve as unknown as Tone.EnvelopeCurve;
+			this.#noiseEnv.decay = e.decay;
+			this.#noiseEnv.sustain = e.sustain;
+			this.#noiseEnv.release = e.release;
+		}
 	}
 
 	#applySub(p: Partial<SubOsc>) {
@@ -256,7 +333,8 @@ class AudioEngine {
 		if (p.shape !== undefined) this.#lfo.type = p.shape as Tone.ToneOscillatorType;
 		if (p.rate !== undefined) this.#lfo.frequency.rampTo(p.rate, 0.02);
 		if (p.depth !== undefined || p.enabled !== undefined) {
-			const d = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
+			const base = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
+			const d = base + this.#modulation * 4000;
 			this.#lfo.min = -d;
 			this.#lfo.max = d;
 		}
@@ -310,6 +388,9 @@ class AudioEngine {
 		this.#osc1?.set({ portamento: time });
 		this.#osc2?.set({ portamento: time });
 		this.#sub?.set({ portamento: time });
+		if (this.#osc1Mono) this.#osc1Mono.portamento = time;
+		if (this.#osc2Mono) this.#osc2Mono.portamento = time;
+		if (this.#subMono) this.#subMono.portamento = time;
 	}
 
 	#applyVoicing(p: Partial<Voicing>) {
@@ -366,10 +447,19 @@ class AudioEngine {
 		return Tone.now();
 	}
 
+	#isGlideMode(mode: string): boolean {
+		return mode === 'legato' || mode === 'porta' || mode === 'scale';
+	}
+
+	#isMonoMode(mode: string): boolean {
+		return mode === 'mono' || mode === 'legato' || mode === 'scale';
+	}
+
 	attack(note: string, time?: number) {
 		if (this.#held.has(note)) return;
 		const mode = this.patch.voicing.mode;
-		const isMono = mode === 'mono' || mode === 'legato' || mode === 'scale';
+		const isMono = this.#isMonoMode(mode);
+		const useGlide = this.#isGlideMode(mode);
 
 		// Mono/legato/scale: release any held notes before attacking new one
 		if (isMono && this.#held.size > 0) {
@@ -381,7 +471,9 @@ class AudioEngine {
 			this.#held.clear();
 		}
 
-		// Proportional portamento: scale glide time by semitone distance
+		// Proportional portamento: scale glide time by semitone distance.
+		// For all glide modes we route through the mono synths so the single
+		// voice can actually glide between consecutive triggers.
 		if (mode === 'scale' && this.#lastNote) {
 			const f1 = Tone.Frequency(this.#lastNote as Tone.Unit.Frequency).toFrequency();
 			const f2 = Tone.Frequency(note as Tone.Unit.Frequency).toFrequency();
@@ -394,18 +486,48 @@ class AudioEngine {
 			this.#applyPortamento(0);
 		}
 
+		const wasEmpty = this.#held.size === 0;
 		this.#held.add(note);
 		this.#lastNote = note;
-		if (this.patch.osc1.enabled) this.#osc1?.triggerAttack(note, time);
-		if (this.patch.osc2.enabled) this.#osc2?.triggerAttack(note, time);
-		if (this.patch.sub.enabled) this.#sub?.triggerAttack(note, time);
+
+		if (useGlide) {
+			// Glide modes: drive the mono synths. PolySynth voices won't glide
+			// because each triggerAttack allocates a fresh voice with no source pitch.
+			if (this.patch.osc1.enabled) this.#osc1Mono?.triggerAttack(note, time);
+			if (this.patch.osc2.enabled) this.#osc2Mono?.triggerAttack(note, time);
+			if (this.patch.sub.enabled) this.#subMono?.triggerAttack(note, time);
+		} else {
+			if (this.patch.osc1.enabled) this.#osc1?.triggerAttack(note, time);
+			if (this.patch.osc2.enabled) this.#osc2?.triggerAttack(note, time);
+			if (this.patch.sub.enabled) this.#sub?.triggerAttack(note, time);
+		}
+
+		if (this.patch.noise.enabled && wasEmpty) {
+			this.#noiseEnv?.triggerAttack(time);
+		}
 	}
 
 	release(note: string, time?: number) {
 		if (!this.#held.delete(note)) return;
-		this.#osc1?.triggerRelease(note, time);
-		this.#osc2?.triggerRelease(note, time);
-		this.#sub?.triggerRelease(note, time);
+		const useGlide = this.#isGlideMode(this.patch.voicing.mode);
+
+		if (useGlide) {
+			// In mono glide modes only release when the LAST held note is gone.
+			// Earlier note-offs just transfer voice to the still-held key.
+			if (this.#held.size === 0) {
+				this.#osc1Mono?.triggerRelease(time);
+				this.#osc2Mono?.triggerRelease(time);
+				this.#subMono?.triggerRelease(time);
+			}
+		} else {
+			this.#osc1?.triggerRelease(note, time);
+			this.#osc2?.triggerRelease(note, time);
+			this.#sub?.triggerRelease(note, time);
+		}
+
+		if (this.#held.size === 0) {
+			this.#noiseEnv?.triggerRelease(time);
+		}
 	}
 
 	releaseAll() {
@@ -414,7 +536,11 @@ class AudioEngine {
 			this.#osc2?.triggerRelease(n);
 			this.#sub?.triggerRelease(n);
 		}
+		this.#osc1Mono?.triggerRelease();
+		this.#osc2Mono?.triggerRelease();
+		this.#subMono?.triggerRelease();
 		this.#held.clear();
+		this.#noiseEnv?.triggerRelease();
 	}
 }
 
