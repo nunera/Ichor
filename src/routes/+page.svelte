@@ -3,6 +3,7 @@
 	import Keyboard from '$lib/ui/Keyboard.svelte';
 	import Wheels from '$lib/ui/Wheels.svelte';
 	import Voicing from '$lib/ui/Voicing.svelte';
+	import Arp from '$lib/ui/Arp.svelte';
 	import SoundDesign from '$lib/ui/SoundDesign.svelte';
 	import { keyboardState } from '$lib/ui/keyboard.svelte';
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
@@ -107,8 +108,11 @@
 			<div class="h-32 shrink-0">
 				<Wheels />
 			</div>
-			<div class="h-32 min-w-0 flex-1">
+			<div class="h-32 w-[34rem] min-w-0 shrink-0">
 				<Keyboard octaves={2} />
+			</div>
+			<div class="h-32 min-w-0 flex-1">
+				<Arp />
 			</div>
 			<div class="h-32 w-32 shrink-0">
 				<Voicing />

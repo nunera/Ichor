@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { audio } from '$lib/audio/engine.svelte';
+	import { arp } from '$lib/audio/arp.svelte';
 	import { keyboardState } from './keyboard.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 
@@ -65,13 +66,13 @@
 
 	function press(note: string) {
 		held.add(note);
-		audio.attack(note);
+		arp.hold(note);
 	}
 
 	function release(note: string) {
 		const stillHeldByPointer = [...pointerNote.values()].includes(note);
 		if (!stillHeldByPointer) held.delete(note);
-		audio.release(note);
+		arp.unhold(note);
 	}
 
 	function noteAt(x: number, y: number): string | null {
@@ -153,7 +154,7 @@
 	function panic() {
 		held.clear();
 		pointerNote.clear();
-		audio.releaseAll();
+		arp.panic();
 	}
 
 	function onVisibility() {
