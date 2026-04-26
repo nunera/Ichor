@@ -14,6 +14,9 @@ import { defaultPatch, validatePatch, type Patch } from '$lib/audio/patch';
  *   { type: 'broadcast', name? }                            // client → server
  *   { type: 'unbroadcast' }                                 // client → server
  *   { type: 'broadcastState', broadcast, name? }            // server → all
+ *   { type: 'cursor', x, y }                                // client → server (0..1)
+ *   { type: 'cursor', from, x, y }                          // server → other peers
+ *   { type: 'leave', from }                                 // server → others on drop
  *
  * Presence accounting note:
  *   We never trust an in-memory Set for the live socket count. The DO can
@@ -35,7 +38,9 @@ export class PatchSession extends DurableObject<Env> {
 		const client = pair[0];
 		const server = pair[1];
 
-		this.ctx.acceptWebSocket(server);
+		// Per-socket id for cursor relay. Survives hibernation via WS tags.
+		const peerId = crypto.randomUUID();
+		this.ctx.acceptWebSocket(server, [peerId]);
 
 		// Live count includes the socket we just accepted.
 		const presence = this.#presence();
@@ -48,7 +53,8 @@ export class PatchSession extends DurableObject<Env> {
 				patch,
 				presence,
 				broadcast,
-				name
+				name,
+				peerId
 			})
 		);
 		// Notify everyone else of the new arrival.
@@ -95,6 +101,17 @@ export class PatchSession extends DurableObject<Env> {
 				await this.ctx.storage.put('broadcast', false);
 				this.#fanout({ type: 'broadcastState', broadcast: false });
 				await this.#syncRegistry();
+			} else if (m.type === 'cursor') {
+				// Stateless relay: echo cursor positions to other peers
+				// tagged with the sender's id. Don't store anything; cursors
+				// are ephemeral and high-frequency.
+				const tags = this.ctx.getTags(ws);
+				const from = tags[0];
+				if (!from) return;
+				const x = (m as { x?: number }).x;
+				const y = (m as { x?: number; y?: number }).y;
+				if (typeof x !== 'number' || typeof y !== 'number') return;
+				this.#fanout({ type: 'cursor', from, x, y }, ws);
 			} else if (m.type === 'ping') {
 				// Liveness ping. Reply with the authoritative presence count so
 				// clients can self-correct any drift.
@@ -110,23 +127,25 @@ export class PatchSession extends DurableObject<Env> {
 	}
 
 	async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean) {
-		// Explicitly close the server-side ws so the runtime drops it from
-		// ctx.getWebSockets() before we count.
+		const from = this.ctx.getTags(ws)[0];
 		try {
 			ws.close();
 		} catch {
 			/* already closing */
 		}
+		if (from) this.#fanout({ type: 'leave', from });
 		this.#fanout({ type: 'presence', count: this.#presence() });
 		await this.#syncRegistry();
 	}
 
 	async webSocketError(ws: WebSocket, _error: unknown) {
+		const from = this.ctx.getTags(ws)[0];
 		try {
 			ws.close();
 		} catch {
 			/* already closing */
 		}
+		if (from) this.#fanout({ type: 'leave', from });
 		this.#fanout({ type: 'presence', count: this.#presence() });
 		await this.#syncRegistry();
 	}

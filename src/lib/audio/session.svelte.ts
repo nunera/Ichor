@@ -20,17 +20,30 @@ import { audio, type WriteEvent } from './engine.svelte';
  *   session.disconnect()                                  — close ws (no reconnect)
  *   session.broadcast(name?), session.unbroadcast()       — public listing toggle
  */
+export type RemoteCursor = { x: number; y: number; color: string; updatedAt: number };
+
+/** Stable hash → hue mapping so each peer gets a consistent color. */
+function colorFor(id: string): string {
+	let h = 0;
+	for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+	return `hsl(${h % 360} 80% 65%)`;
+}
+
 class SessionClient {
 	connected = $state(false);
 	id = $state<string | null>(null);
 	peers = $state(0);
 	broadcasting = $state(false);
 	broadcastName = $state<string | null>(null);
+	peerId = $state<string | null>(null);
+	cursors = $state<Map<string, RemoteCursor>>(new Map());
 
 	#ws: WebSocket | null = null;
 	#unsub: (() => void) | null = null;
 	#pending = new Map<string, unknown>();
 	#flushScheduled = false;
+	#cursorScheduled = false;
+	#pendingCursor: { x: number; y: number } | null = null;
 
 	#pingTimer: ReturnType<typeof setInterval> | null = null;
 	#reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -135,6 +148,8 @@ class SessionClient {
 		this.peers = 0;
 		this.broadcasting = false;
 		this.broadcastName = null;
+		this.peerId = null;
+		this.cursors = new Map();
 	}
 
 	broadcast(name?: string) {
@@ -145,6 +160,25 @@ class SessionClient {
 	unbroadcast() {
 		if (this.#ws?.readyState !== WebSocket.OPEN) return;
 		this.#ws.send(JSON.stringify({ type: 'unbroadcast' }));
+	}
+
+	/**
+	 * Queue a cursor update (normalized 0..1 coords). Coalesced to one send
+	 * per requestAnimationFrame so a fast-moving pointer becomes ~60 Hz on
+	 * the wire instead of hundreds of events.
+	 */
+	sendCursor(x: number, y: number) {
+		if (!this.connected) return;
+		this.#pendingCursor = { x, y };
+		if (this.#cursorScheduled) return;
+		this.#cursorScheduled = true;
+		requestAnimationFrame(() => {
+			this.#cursorScheduled = false;
+			const c = this.#pendingCursor;
+			this.#pendingCursor = null;
+			if (!c || this.#ws?.readyState !== WebSocket.OPEN) return;
+			this.#ws.send(JSON.stringify({ type: 'cursor', x: c.x, y: c.y }));
+		});
 	}
 
 	#teardownSubscription() {
@@ -168,6 +202,7 @@ class SessionClient {
 			if (typeof msg.presence === 'number') this.peers = msg.presence;
 			this.broadcasting = msg.broadcast === true;
 			this.broadcastName = typeof msg.name === 'string' ? msg.name : null;
+			this.peerId = typeof msg.peerId === 'string' ? msg.peerId : null;
 		} else if (msg.type === 'patch') {
 			audio.loadPatch(msg.patch, 'remote');
 		} else if (msg.type === 'section') {
@@ -183,6 +218,20 @@ class SessionClient {
 		} else if (msg.type === 'broadcastState') {
 			this.broadcasting = msg.broadcast === true;
 			this.broadcastName = typeof msg.name === 'string' ? msg.name : null;
+		} else if (msg.type === 'cursor') {
+			const from = msg.from as string | undefined;
+			const x = msg.x as number | undefined;
+			const y = msg.y as number | undefined;
+			if (!from || typeof x !== 'number' || typeof y !== 'number') return;
+			const next = new Map(this.cursors);
+			next.set(from, { x, y, color: colorFor(from), updatedAt: Date.now() });
+			this.cursors = next;
+		} else if (msg.type === 'leave') {
+			const from = msg.from as string | undefined;
+			if (!from) return;
+			const next = new Map(this.cursors);
+			next.delete(from);
+			this.cursors = next;
 		}
 	}
 

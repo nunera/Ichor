@@ -236,17 +236,21 @@ class AudioEngine {
 		Tone.getDestination().volume.rampTo(db, 0.05);
 	}
 
-	attack(note: string) {
-		if (this.#held.has(note)) return;
-		this.#held.add(note);
-		if (this.patch.osc1.enabled) this.#osc1?.triggerAttack(note);
-		if (this.patch.osc2.enabled) this.#osc2?.triggerAttack(note);
+	now() {
+		return Tone.now();
 	}
 
-	release(note: string) {
+	attack(note: string, time?: number) {
+		if (this.#held.has(note)) return;
+		this.#held.add(note);
+		if (this.patch.osc1.enabled) this.#osc1?.triggerAttack(note, time);
+		if (this.patch.osc2.enabled) this.#osc2?.triggerAttack(note, time);
+	}
+
+	release(note: string, time?: number) {
 		if (!this.#held.delete(note)) return;
-		this.#osc1?.triggerRelease(note);
-		this.#osc2?.triggerRelease(note);
+		this.#osc1?.triggerRelease(note, time);
+		this.#osc2?.triggerRelease(note, time);
 	}
 
 	releaseAll() {

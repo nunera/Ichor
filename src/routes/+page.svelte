@@ -7,6 +7,9 @@
 	import PatchEditor from '$lib/ui/PatchEditor.svelte';
 	import SessionBadge from '$lib/ui/SessionBadge.svelte';
 	import BrowseSessions from '$lib/ui/BrowseSessions.svelte';
+	import StrudelDrawer from '$lib/ui/StrudelDrawer.svelte';
+	import MIDIIndicator from '$lib/ui/MIDIIndicator.svelte';
+	import CursorLayer from '$lib/ui/CursorLayer.svelte';
 
 	let volume = $state(-12);
 	let vizMode = $state<'scope' | 'spectrum'>('scope');
@@ -17,6 +20,8 @@
 </script>
 
 <PatchEditor />
+<StrudelDrawer />
+<CursorLayer />
 
 <main class="flex h-screen flex-col gap-3 overflow-hidden">
 	<!--
@@ -65,7 +70,8 @@
 			</button>
 		</div>
 
-		<div class="relative flex items-center gap-3">
+		<div class="relative flex items-center gap-3 pr-8">
+			<MIDIIndicator />
 			<BrowseSessions />
 			<SessionBadge />
 			<label class="flex items-center gap-2 text-xs text-subtext1">

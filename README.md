@@ -30,6 +30,7 @@
 - Live JSON patch editor (Cmd/Ctrl-S to apply) tucked behind a sliding trapezoid flag on the left edge
 - Three Catppuccin themes: **latte**, **mocha**, **sky** (mocha with a sky-blue accent + purple secondary)
 - **Live multiplayer sessions** via Cloudflare Durable Objects: click "share" → get a URL → anyone who opens it edits the same patch in real time, with presence count
+- **Live coding / Sequencing** via `@strudel/core`: write patterns in a side drawer (e.g. `note("c3 eb3 g3 bb3").s("ichor").slow(4)`), and a custom lookahead scheduler feeds it into the synth in real time.
 
 ---
 

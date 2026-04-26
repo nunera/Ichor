@@ -6,6 +6,11 @@
 	import { cubicOut } from 'svelte/easing';
 	import PresetCloud from './PresetCloud.svelte';
 
+	// Dynamic CodeMirror import
+	let CodeMirror: any = $state(null);
+	let jsonLang: any = $state(null);
+	let catppuccinTheme: any = $state(null);
+
 	let open = $state(false);
 	let text = $state('');
 	let error = $state<string | null>(null);
@@ -16,19 +21,45 @@
 	}
 
 	// Keep the textarea in sync with the patch UNLESS the user is editing.
-	// Subscribed to all writes; ignores 'editor' so we never clobber typing.
-	onMount(() => {
-		text = format(audio.patch);
-		const off = audio.subscribe((e) => {
-			if (e.source === 'editor') return;
-			if (dirty) return; // user has unsaved local edits, don't overwrite
-			text = format(audio.patch);
-		});
-		return off;
+	// We use an effect to track audio.patch reactively, removing the need for
+	// manual subscription management in onMount.
+	$effect(() => {
+		const currentPatch = audio.patch;
+		if (!dirty) {
+			const newText = format(currentPatch);
+			if (text !== newText) {
+				text = newText;
+				error = null;
+			}
+		}
 	});
 
-	function onInput(e: Event) {
-		text = (e.currentTarget as HTMLTextAreaElement).value;
+	onMount(() => {
+		Promise.all([
+			import('svelte-codemirror-editor'),
+			import('@codemirror/lang-json'),
+			import('@codemirror/language'),
+			import('@lezer/highlight')
+		]).then(([cmModule, jsModule, languageModule, highlightModule]) => {
+			CodeMirror = cmModule.default;
+			jsonLang = jsModule.json;
+
+			// Define a strict highlight style using Catppuccin CSS variables
+			const { tags: t } = highlightModule;
+			catppuccinTheme = languageModule.HighlightStyle.define([
+				{ tag: t.propertyName, color: 'var(--ctp-mauve)' },
+				{ tag: [t.string, t.special(t.brace)], color: 'var(--ctp-teal)' },
+				{ tag: t.number, color: 'var(--ctp-blue)' },
+				{ tag: t.bool, color: 'var(--ctp-blue)' },
+				{ tag: t.punctuation, color: 'var(--ctp-subtext0)' },
+				{ tag: t.bracket, color: 'var(--ctp-text)' },
+				{ tag: t.keyword, color: 'var(--ctp-mauve)' }
+			]);
+		});
+	});
+
+	function onInput(val: string) {
+		text = val;
 		dirty = true;
 		// Live-validate so the error indicator reflects current text.
 		try {
@@ -124,17 +155,61 @@
 			</div>
 		</header>
 
-		<textarea
-			value={text}
-			oninput={onInput}
-			onkeydown={onKeydown}
-			spellcheck="false"
-			class="flex-1 resize-none rounded-md border bg-base p-3 font-mono text-[11px] leading-relaxed text-text outline-none focus:ring-1"
+		<div
+			class="flex-1 overflow-hidden rounded-md border bg-base text-[11px] focus-within:ring-1 [&_.cm-editor]:h-full [&_.cm-scroller]:h-full [&>div]:h-full"
 			class:border-surface1={!error}
-			class:focus:ring-mauve={!error}
+			class:focus-within:border-mauve={!error}
+			class:focus-within:ring-mauve={!error}
 			class:border-red={!!error}
-			class:focus:ring-red={!!error}
-		></textarea>
+			class:focus-within:border-red={!!error}
+			class:focus-within:ring-red={!!error}
+			onkeydown={onKeydown}
+			role="textbox"
+			tabindex="0"
+		>
+			{#if CodeMirror && jsonLang && catppuccinTheme}
+				<CodeMirror
+					value={text}
+					on:change={(e: any) => onInput(e.detail)}
+					lang={jsonLang()}
+					syntaxHighlighting={{ highlighter: catppuccinTheme, fallback: true }}
+					styles={{
+						'&': {
+							backgroundColor: 'transparent',
+							color: 'var(--ctp-text)'
+						},
+						'.cm-scroller': {
+							fontFamily: 'var(--font-mono, monospace)',
+							overflow: 'auto'
+						},
+						'.cm-content': {
+							minHeight: '100%',
+							caretColor: 'var(--ctp-mauve)'
+						},
+						'.cm-gutters': {
+							backgroundColor: 'transparent',
+							color: 'var(--ctp-subtext0)',
+							borderRight: '1px solid var(--ctp-surface1)'
+						},
+						'.cm-activeLine, .cm-activeLineGutter': {
+							backgroundColor: 'var(--ctp-surface0) !important'
+						},
+						'.cm-cursor, .cm-dropCursor': {
+							borderLeftColor: 'var(--ctp-mauve) !important'
+						},
+						'.cm-selectionMatch': {
+							backgroundColor: 'var(--ctp-surface1)'
+						}
+					}}
+				/>
+			{:else}
+				<textarea
+					value={text}
+					oninput={(e) => onInput(e.currentTarget.value)}
+					class="h-full w-full resize-none bg-transparent p-3 font-mono outline-none"
+				></textarea>
+			{/if}
+		</div>
 
 		{#if error}
 			<pre
