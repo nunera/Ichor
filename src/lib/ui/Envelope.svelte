@@ -6,11 +6,28 @@
 
 	// Maximum durations (seconds) used to scale time on screen.
 	const MAX = { attack: 2, hold: 2, decay: 2, release: 4 };
-	// Visual width allotted to each stage (in SVG user units).
-	const W = { attack: 80, hold: 80, decay: 80, sustainPad: 50, release: 100 };
-	const H = 120;
 	const PAD = 12;
-	const totalW = W.attack + W.hold + W.decay + W.sustainPad + W.release + PAD * 2;
+
+	// The SVG measures its own size and we set viewBox 1:1 with CSS pixels,
+	// so circles stay round and text stays normal width. Stage widths are
+	// derived from the actual width so the curve fills the box.
+	let svgEl: SVGSVGElement;
+	let viewW = $state(640);
+	let viewH = $state(180);
+
+	// Inner stage proportions (sum = 1). Distribute the available content
+	// width across stages: attack | hold | decay | sustain pad | release.
+	const STAGE_RATIO = { attack: 0.18, hold: 0.18, decay: 0.18, sustainPad: 0.16, release: 0.3 };
+	const innerW = $derived(viewW - PAD * 2);
+	const W = $derived({
+		attack: innerW * STAGE_RATIO.attack,
+		hold: innerW * STAGE_RATIO.hold,
+		decay: innerW * STAGE_RATIO.decay,
+		sustainPad: innerW * STAGE_RATIO.sustainPad,
+		release: innerW * STAGE_RATIO.release
+	});
+	const H = $derived(viewH);
+	const totalW = $derived(viewW);
 
 	// Convert seconds → x offset within each stage.
 	const ax = $derived((env.attack / MAX.attack) * W.attack);
@@ -50,7 +67,6 @@
 
 	type Handle = 'A' | 'H' | 'D' | 'S' | 'R';
 	let dragging = $state<Handle | null>(null);
-	let svgEl: SVGSVGElement;
 
 	function onDown(h: Handle, e: PointerEvent) {
 		dragging = h;
@@ -106,6 +122,17 @@
 	function fmt(v: number) {
 		return v < 1 ? `${(v * 1000).toFixed(0)} ms` : `${v.toFixed(2)} s`;
 	}
+
+	$effect(() => {
+		if (!svgEl) return;
+		const ro = new ResizeObserver(([entry]) => {
+			const r = entry.contentRect;
+			viewW = Math.max(120, r.width);
+			viewH = Math.max(80, r.height);
+		});
+		ro.observe(svgEl);
+		return () => ro.disconnect();
+	});
 </script>
 
 <div class="flex h-full min-h-0 flex-col gap-2">
@@ -117,7 +144,6 @@
 	<svg
 		bind:this={svgEl}
 		viewBox="0 0 {totalW} {H}"
-		preserveAspectRatio="none"
 		class="min-h-0 w-full flex-1 touch-none rounded-md bg-mantle"
 		onpointermove={onMove}
 		onpointerup={onUp}
@@ -168,35 +194,35 @@
 			cx={x1}
 			cy={yTop}
 			r="6"
-			class="cursor-ew-resize fill-peach"
+			class="cursor-ew-resize fill-mauve"
 			onpointerdown={(e) => onDown('A', e)}
 		/>
 		<circle
 			cx={x2}
 			cy={yTop}
 			r="6"
-			class="cursor-ew-resize fill-yellow"
+			class="cursor-ew-resize fill-lavender"
 			onpointerdown={(e) => onDown('H', e)}
 		/>
 		<circle
 			cx={x3}
 			cy={sustainY}
 			r="6"
-			class="cursor-move fill-green"
+			class="cursor-move fill-blue"
 			onpointerdown={(e) => onDown('D', e)}
 		/>
 		<circle
 			cx={x4}
 			cy={sustainY}
 			r="6"
-			class="cursor-ns-resize fill-teal"
+			class="cursor-ns-resize fill-sapphire"
 			onpointerdown={(e) => onDown('S', e)}
 		/>
 		<circle
 			cx={x5}
 			cy={yBot}
 			r="6"
-			class="cursor-ew-resize fill-blue"
+			class="cursor-ew-resize fill-sky"
 			onpointerdown={(e) => onDown('R', e)}
 		/>
 

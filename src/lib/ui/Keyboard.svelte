@@ -222,11 +222,11 @@
 			{@const widthPct = (1 / totalWhites) * 0.6 * 100}
 			<div
 				data-note={k.note}
-				class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-crust pb-2 text-center text-[9px] shadow-lg transition-colors"
-				class:bg-crust={!active}
-				class:text-subtext0={!active}
+				class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-key-black pb-2 text-center text-[9px] shadow-lg transition-colors"
+				class:bg-key-black={!active}
+				class:text-key-black-text={!active}
 				class:bg-lavender={active}
-				class:text-crust={active}
+				class:text-key-black={active}
 				style:left="{leftPct}%"
 				style:width="{widthPct}%"
 			>

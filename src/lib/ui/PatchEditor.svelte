@@ -2,6 +2,9 @@
 	import { audio } from '$lib/audio/engine.svelte';
 	import { safeValidatePatch } from '$lib/audio/patch';
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
+	import PresetCloud from './PresetCloud.svelte';
 
 	let open = $state(false);
 	let text = $state('');
@@ -66,35 +69,40 @@
 	}
 </script>
 
-<!-- Trapezoid flag pinned to the left edge: tall side flush against the
-     screen edge, narrower side into the page. Text rotated 90° so it
-     reads vertically along the long edge. -->
-<button
-	class="fixed top-4 left-0 z-30 flex h-24 w-8 cursor-pointer items-center justify-center text-[11px] tracking-widest uppercase transition-colors"
-	style:clip-path="polygon(0 0, 100% 15%, 100% 85%, 0 100%)"
-	class:bg-mauve={open}
-	class:text-base={open}
-	class:bg-surface1={!open}
-	class:text-subtext1={!open}
-	onclick={() => (open = !open)}
-	aria-label="toggle patch editor"
-	aria-expanded={open}
->
-	<span style:writing-mode="vertical-rl" style:transform="rotate(180deg)">patch</span>
-</button>
-
+<!-- Backdrop fades in/out independently of the drawer. The preset cloud
+     lives inside it so the floating nodes appear in the blurred space. -->
 {#if open}
-	<!-- Backdrop click closes -->
 	<div
-		class="fixed inset-0 z-20 bg-crust/60 backdrop-blur-sm"
+		class="fixed inset-0 z-20 bg-crust/60 backdrop-blur-sm transition-[opacity,backdrop-filter] duration-300"
 		role="presentation"
 		onclick={() => (open = false)}
-	></div>
+		transition:fade={{ duration: 250, easing: cubicOut }}
+	>
+		<!-- Cloud lives offset to the right of the drawer. The cloud's nodes
+		     stop their own bubbling internally so dragging them doesn't close
+		     the drawer; clicking empty space here still hits the backdrop. -->
+		<div class="absolute inset-0 left-[min(28rem,90vw)]" role="presentation">
+			<PresetCloud active={open} />
+		</div>
+	</div>
+{/if}
 
+<!--
+  Drawer + flag move as one unit. The container is anchored to the left edge
+  and translated by the drawer width when open. The flag sits at right:0 of
+  the container so it's always flush against the drawer's right edge —
+  visible at the screen edge when closed, riding the drawer when open.
+-->
+<div
+	class="fixed top-0 left-0 z-30 flex h-full w-[min(28rem,90vw)] -translate-x-full transition-transform duration-[450ms]"
+	class:!translate-x-0={open}
+	style:transition-timing-function="cubic-bezier(0.22, 1, 0.36, 1)"
+>
 	<aside
-		class="fixed top-0 left-0 z-30 flex h-full w-[min(28rem,90vw)] flex-col gap-2 border-r border-surface1 bg-mantle p-4 pt-16 shadow-2xl"
+		class="flex h-full w-full flex-col gap-2 border-r border-surface1 bg-mantle p-4 shadow-2xl"
 		role="dialog"
 		aria-label="patch editor"
+		aria-hidden={!open}
 	>
 		<header class="flex items-center justify-between">
 			<h2 class="text-xs tracking-widest text-subtext0 uppercase">patch · json</h2>
@@ -137,4 +145,19 @@
 			</p>
 		{/if}
 	</aside>
-{/if}
+
+	<!-- Flag sits flush against the drawer's right edge; rides with it. -->
+	<button
+		class="absolute top-4 left-full flex h-24 w-8 cursor-pointer items-center justify-center text-[11px] tracking-widest uppercase transition-colors"
+		style:clip-path="polygon(0 0, 100% 15%, 100% 85%, 0 100%)"
+		class:bg-mauve={open}
+		class:text-base={open}
+		class:bg-surface1={!open}
+		class:text-subtext1={!open}
+		onclick={() => (open = !open)}
+		aria-label="toggle patch editor"
+		aria-expanded={open}
+	>
+		<span style:writing-mode="vertical-rl" style:transform="rotate(180deg)">patch</span>
+	</button>
+</div>

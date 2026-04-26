@@ -1,33 +1,44 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	let theme = $state<'light' | 'dark'>('dark');
+	type Theme = 'latte' | 'mocha' | 'sky';
+	const themes: Theme[] = ['latte', 'mocha', 'sky'];
+
+	let theme = $state<Theme>('mocha');
 
 	onMount(() => {
-		const stored = localStorage.getItem('ichor-theme') as 'light' | 'dark' | null;
-		const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-		theme = stored ?? (prefersDark ? 'dark' : 'light');
+		const stored = localStorage.getItem('ichor-theme') as Theme | null;
+		if (stored && themes.includes(stored)) {
+			theme = stored;
+		} else {
+			const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			theme = prefersDark ? 'mocha' : 'latte';
+		}
 	});
 
 	$effect(() => {
 		if (typeof document === 'undefined') return;
-		document.documentElement.classList.toggle('dark', theme === 'dark');
+		const cl = document.documentElement.classList;
+		// "dark" enables the dark Catppuccin palette; "sky" additionally
+		// remaps the accent. Keep both in sync with `theme`.
+		cl.toggle('dark', theme === 'mocha' || theme === 'sky');
+		cl.toggle('sky', theme === 'sky');
 		try {
 			localStorage.setItem('ichor-theme', theme);
 		} catch {
 			/* ignore */
 		}
 	});
-
-	function toggle() {
-		theme = theme === 'dark' ? 'light' : 'dark';
-	}
 </script>
 
-<button
-	onclick={toggle}
-	aria-label="Toggle theme"
-	class="rounded-md border border-surface1 bg-surface0 px-3 py-1.5 text-xs text-subtext0 transition-colors hover:bg-surface1 hover:text-text"
->
-	{theme === 'dark' ? 'mocha' : 'latte'}
-</button>
+<label class="flex items-center gap-2 text-xs text-subtext1">
+	theme
+	<select
+		bind:value={theme}
+		class="rounded-md border border-surface1 bg-surface0 px-2 py-1 text-text outline-none focus:border-mauve"
+	>
+		{#each themes as t (t)}
+			<option value={t}>{t}</option>
+		{/each}
+	</select>
+</label>

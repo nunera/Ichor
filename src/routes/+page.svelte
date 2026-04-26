@@ -7,6 +7,7 @@
 	import PatchEditor from '$lib/ui/PatchEditor.svelte';
 
 	let volume = $state(-12);
+	let vizMode = $state<'scope' | 'spectrum'>('scope');
 
 	$effect(() => {
 		audio.setVolume(volume);
@@ -15,14 +16,54 @@
 
 <PatchEditor />
 
-<main class="mx-auto flex h-screen max-w-7xl flex-col gap-3 overflow-hidden p-4">
-	<header class="flex items-end justify-between gap-4 pl-28">
-		<div>
-			<h1 class="text-2xl tracking-widest text-text lowercase">ichor</h1>
-			<p class="text-xs text-subtext0">layer 1 — sound design</p>
+<main class="flex h-screen flex-col gap-3 overflow-hidden">
+	<!--
+	  Header is full-page-width: the visualizer canvas spans edge-to-edge
+	  behind the title and controls. Pointer events fall through the canvas
+	  to the toggle below.
+	-->
+	<header
+		class="relative flex h-20 shrink-0 items-end justify-between gap-4 overflow-hidden px-6 pl-32"
+	>
+		<Visualizer mode={vizMode} ambient class="absolute inset-0 h-full w-full" />
+
+		<div class="relative flex items-end gap-4">
+			<div>
+				<h1 class="text-2xl tracking-widest text-text lowercase">ichor</h1>
+				<p class="text-xs text-subtext0">layer 1 — sound design</p>
+			</div>
+
+			<button
+				class="group ml-2 flex items-center gap-1 rounded-full border border-surface1 bg-base/70 px-2 py-1 backdrop-blur-sm transition-colors hover:border-mauve"
+				onclick={() => (vizMode = vizMode === 'scope' ? 'spectrum' : 'scope')}
+				aria-label="toggle visualizer mode"
+				title="toggle scope / spectrum"
+			>
+				<svg viewBox="0 0 24 8" class="h-2 w-6">
+					{#if vizMode === 'scope'}
+						<path
+							d="M0 4 Q3 0 6 4 T12 4 T18 4 T24 4"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.5"
+							class="text-mauve"
+						/>
+					{:else}
+						<g class="fill-mauve">
+							<rect x="1" y="5" width="2" height="3" />
+							<rect x="5" y="2" width="2" height="6" />
+							<rect x="9" y="4" width="2" height="4" />
+							<rect x="13" y="1" width="2" height="7" />
+							<rect x="17" y="3" width="2" height="5" />
+							<rect x="21" y="6" width="2" height="2" />
+						</g>
+					{/if}
+				</svg>
+				<span class="text-[10px] text-subtext0 group-hover:text-text">{vizMode}</span>
+			</button>
 		</div>
 
-		<div class="flex items-center gap-6">
+		<div class="relative flex items-center gap-6">
 			<label class="flex items-center gap-2 text-xs text-subtext1">
 				master
 				<input type="range" min="-40" max="0" step="1" bind:value={volume} class="accent-mauve" />
@@ -32,23 +73,19 @@
 		</div>
 	</header>
 
-	<!-- Sound design takes the remaining vertical space and lays out its
-	     cards in a 4-col / 2-row grid so nothing has to scroll. -->
-	<div class="min-h-0 flex-1">
-		<SoundDesign />
+	<!-- Content below the header is centred & capped. -->
+	<div class="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 px-4 pb-4">
+		<div class="min-h-0 flex-1">
+			<SoundDesign />
+		</div>
+
+		<Keyboard octaves={3} />
+
+		<footer class="text-[10px] text-overlay1">
+			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">a–j</kbd> /
+			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">k–'</kbd> play notes ·
+			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">z</kbd>
+			<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">x</kbd> shift octave
+		</footer>
 	</div>
-
-	<!-- Visualizer = horizontal strip above the keyboard. -->
-	<div class="h-28 shrink-0">
-		<Visualizer />
-	</div>
-
-	<Keyboard octaves={3} />
-
-	<footer class="text-[10px] text-overlay1">
-		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">a–j</kbd> /
-		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">k–'</kbd> play notes ·
-		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">z</kbd>
-		<kbd class="rounded bg-surface0 px-1.5 py-0.5 text-text">x</kbd> shift octave
-	</footer>
 </main>

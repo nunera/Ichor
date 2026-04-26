@@ -18,15 +18,25 @@
 
 ## Status
 
-Early. Right now there's a single playable octave with a basic synth — the spine. Everything else gets built on top of that, one small piece at a time.
+**Layer 1 — sound design.** A playable Serum-inspired synth in the browser:
+
+- Two oscillators (sine / square / saw / triangle) with octave / semi / fine detune, level, enable
+- AHDSR envelope with a draggable visual editor and matching knobs
+- Lowpass filter (24 dB) with cutoff + resonance
+- LFO → cutoff with rate, depth, enable
+- Multi-octave keyboard (3 octaves) with mouse glissando, two rows of keybinds (`a–j` / `k–'`), `z` / `x` to shift octave
+- Live oscilloscope + spectrum analyser as the page header background, toggle in the top-left
+- 30+ built-in presets in a floating, physics-based picker (drag nodes, hover to highlight category connections, click to load)
+- Live JSON patch editor (Cmd/Ctrl-S to apply) tucked behind a sliding trapezoid flag on the left edge
+- Three Catppuccin themes: **latte**, **mocha**, **sky** (mocha with a sky-blue accent + purple secondary)
 
 ---
 
 ## Stack
 
 - **Svelte 5** (runes) + **SvelteKit**
-- **TypeScript**
-- **Tailwind CSS**
+- **TypeScript** + **Zod** (canonical patch schema, validated at every write)
+- **Tailwind CSS** v4 (Catppuccin tokens via `@theme inline`)
 - **Tone.js** on top of the Web Audio API
 - **Cloudflare Workers** (adapter: `sveltekit-adapter cloudflare+cfTarget:workers`)
 - **Vite** for dev & build
@@ -69,14 +79,38 @@ It's a static-friendly SvelteKit app; `pnpm preview` is enough for local-only us
 ```
 src/
   lib/
-    audio/        # Web Audio graph, voices, scheduler
-    dsp/          # AudioWorklet processors (filters, fx, synths)
-    ui/           # Keyboard, knobs, sequencer, piano roll
-    state/        # Runes-based stores (project, transport, patches)
-    midi/         # Web MIDI + gamepad + websocket controllers
-  routes/         # SvelteKit routes
-static/           # Drum samples, presets, icons
+    audio/
+      patch.ts          # Zod schema, types, defaults, validators
+      engine.svelte.ts  # AudioEngine: Tone graph, validated setters,
+                        # subscribe API, write-source tagging
+      presets.ts        # Built-in presets grouped by category
+    ui/
+      Keyboard.svelte       # Multi-octave keyboard, glissando, octave shift
+      SoundDesign.svelte    # Two-row grid: osc1 / osc2 / filter then env / lfo
+      OscCard.svelte        # Per-osc waveform display + 4 knobs
+      Envelope.svelte       # Draggable AHDSR + knob row, ResizeObserver-sized SVG
+      LFOWave.svelte        # Inline LFO shape preview
+      Knob.svelte           # Circular knob (drag, wheel, dblclick, exponential curves)
+      Visualizer.svelte     # Canvas oscilloscope + spectrum, theme-aware
+      ThemeToggle.svelte    # latte / mocha / sky picker
+      PatchEditor.svelte    # Sliding drawer + trapezoid flag, live JSON
+      PresetCloud.svelte    # Verlet-physics preset picker, lives in the blur space
+  routes/
+    +page.svelte         # Layout: full-bleed visualizer header → controls → keys
+    layout.css           # Catppuccin tokens (latte / mocha / sky)
 ```
+
+### Architecture notes
+
+- **Single source of truth.** `audio.patch` is `$state`; every UI input goes
+  through a validated setter (`audio.setOsc1`, `setEnvelope`, …) that runs
+  the input through Zod before mutating state or touching the audio graph.
+- **Write-source tagging.** Every setter accepts `'ui' | 'editor' | 'remote' | 'midi'`.
+  The JSON editor and (eventually) network sync subscribe to writes and
+  filter out their own source tag to prevent echo loops.
+- **`audio.subscribe(fn)`** emits a `WriteEvent` after every change. This is
+  the surface bidirectional sync (URL hash, websockets, Strudel) will hook into.
+- **`audio.loadPatch(value, source)`** atomically validates and applies a full patch.
 
 ---
 
@@ -96,19 +130,18 @@ pnpm dlx sv@0.15.1 create --template minimal --types ts \
 
 Built in public, in small increments. The rough direction, loosest to firmest:
 
-- groovebox / step sequencer
-- sampling (mic, file, tab capture)
-- sound design (ADSR, filters, second osc, LFO)
+- **next:** Strudel param hook (sequencing handled externally), URL-hash share links
+- **then:** Cloudflare Durable Object websocket sync (live multiplayer patches)
 - effects rack (reverb, delay, distortion, eq, comp)
-- guided exploration & genre templates
-- Synplant-style sound exploration
-- piano roll, arpeggiator, euclidean rhythms
-- accessibility, Web MIDI, gamepad / Pi controllers
+- pitch bend + mod wheel, Web MIDI
+- sampling (mic, file, tab capture)
+- export (WAV / MP3 / stems / MIDI)
+- granular / FM / wavetable synths
 - AI helpers (vibe → arrangement, "more space", etc.)
-- export (WAV / MP3 / stems / MIDI), save, multiplayer (Durable Objects), shareable links
-- visualizers, granular / FM / wavetable synths
+- accessibility, gamepad / Pi controllers
+- guided exploration & genre templates, Synplant-style sound exploration
 
-Nothing here is committed to. It's a list of things that would be cool, in roughly the order they make sense to build.
+Nothing here is committed to. It's a list of things that would be cool, in roughly the order they make sense to build. **Sequencing is intentionally out of scope** — that lane belongs to [Strudel](https://strudel.cc).
 
 ---
 
