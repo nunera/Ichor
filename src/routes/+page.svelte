@@ -36,7 +36,7 @@
 
 		<div class="relative flex items-end gap-4">
 			<div>
-				<h1 class="text-2xl tracking-widest text-text lowercase">ichor</h1>
+				<h1 class="text-2xl tracking-[0.15em] text-text border border-mauve/60 bg-base px-3 py-1" style="font-family: 'Oxanium', sans-serif; font-weight: 300;">ICHOR</h1>
 				<p class="text-xs text-subtext0">layer 1 — sound design</p>
 			</div>
 

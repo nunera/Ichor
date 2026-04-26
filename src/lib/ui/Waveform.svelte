@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { Waveform } from '$lib/audio/engine.svelte';
 
-	type Props = { type: Waveform; class?: string };
-	let { type, class: cls = '' }: Props = $props();
+	type Props = { type: Waveform; width?: number; class?: string };
+	let { type, width = 0.5, class: cls = '' }: Props = $props();
 
 	const W = 120;
 	const H = 40;
@@ -20,6 +20,10 @@
 			case 'triangle': {
 				const u = (t * cycles) % 1;
 				return 4 * Math.abs(u - 0.5) - 1;
+			}
+			case 'pulse': {
+				const phase = (t * cycles) % 1;
+				return phase < width ? 1 : -1;
 			}
 		}
 	}

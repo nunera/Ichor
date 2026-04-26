@@ -249,7 +249,7 @@
 				min={0.001}
 				max={2}
 				step={0.001}
-				size={44}
+				size={24}
 				curve={2}
 				format={fmt}
 				onchange={(v) => audio.setEnvelope({ attack: v })}
@@ -262,7 +262,7 @@
 				min={0}
 				max={2}
 				step={0.001}
-				size={44}
+				size={24}
 				curve={2}
 				format={fmt}
 				onchange={(v) => audio.setEnvelope({ hold: v })}
@@ -275,7 +275,7 @@
 				min={0.001}
 				max={2}
 				step={0.001}
-				size={44}
+				size={24}
 				curve={2}
 				format={fmt}
 				onchange={(v) => audio.setEnvelope({ decay: v })}
@@ -288,7 +288,7 @@
 				min={0}
 				max={1}
 				step={0.01}
-				size={44}
+				size={24}
 				format={(v) => `${(v * 100).toFixed(0)}%`}
 				onchange={(v) => audio.setEnvelope({ sustain: v })}
 			/>
@@ -300,7 +300,7 @@
 				min={0.001}
 				max={4}
 				step={0.001}
-				size={44}
+				size={24}
 				curve={2}
 				format={fmt}
 				onchange={(v) => audio.setEnvelope({ release: v })}

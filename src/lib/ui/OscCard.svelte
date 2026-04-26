@@ -6,7 +6,7 @@
 	type Props = { which: 'osc1' | 'osc2' };
 	let { which }: Props = $props();
 
-	const waves: Waveform[] = ['sine', 'square', 'sawtooth', 'triangle'];
+	const waves: Waveform[] = ['sine', 'square', 'sawtooth', 'triangle', 'pulse'];
 	const osc = $derived(audio.patch[which]);
 	const title = $derived(which === 'osc1' ? 'osc 1' : 'osc 2');
 
@@ -23,10 +23,10 @@
 </script>
 
 <section
-	class="flex h-full min-h-0 flex-col gap-2 rounded-lg border border-surface0 bg-mantle/60 p-3"
+	class="flex h-full min-h-0 flex-col gap-1 overflow-hidden rounded-lg border border-surface0 bg-mantle/60 p-2"
 	class:opacity-50={!osc.enabled}
 >
-	<header class="flex items-center gap-2">
+	<header class="flex shrink-0 items-center gap-2">
 		<input
 			type="checkbox"
 			checked={osc.enabled}
@@ -38,15 +38,15 @@
 	</header>
 
 	<!-- Waveform display + selector -->
-	<div class="flex items-center gap-2 rounded-md bg-base/60 p-2">
+	<div class="flex shrink-0 items-center gap-2 rounded-md bg-base/60 p-1.5">
 		<button
 			class="rounded px-1 text-overlay1 hover:text-text"
 			onclick={() => cycleWave(-1)}
 			aria-label="previous waveform">‹</button
 		>
 		<div class="flex flex-1 flex-col items-center">
-			<Waveform_ type={osc.type} class="h-10 w-full" />
-			<span class="mt-1 text-[10px] tracking-wide text-subtext0 lowercase">{osc.type}</span>
+			<Waveform_ type={osc.type} width={osc.width} class="h-8 w-full" />
+			<span class="mt-0.5 text-[10px] tracking-wide text-subtext0 lowercase">{osc.type}</span>
 		</div>
 		<button
 			class="rounded px-1 text-overlay1 hover:text-text"
@@ -55,47 +55,28 @@
 		>
 	</div>
 
-	<!-- All four knobs on one row -->
-	<div class="flex items-end justify-around gap-1">
-		<Knob
-			label="oct"
-			value={osc.octave}
-			min={-3}
-			max={3}
-			step={1}
-			size={36}
-			format={(v) => (v > 0 ? `+${v}` : `${v}`)}
-			onchange={(v) => set({ octave: v })}
-		/>
-		<Knob
-			label="semi"
-			value={osc.semi}
-			min={-12}
-			max={12}
-			step={1}
-			size={36}
-			format={(v) => (v > 0 ? `+${v}` : `${v}`)}
-			onchange={(v) => set({ semi: v })}
-		/>
-		<Knob
-			label="fine"
-			value={osc.fine}
-			min={-50}
-			max={50}
-			step={1}
-			size={36}
-			unit=" ct"
-			onchange={(v) => set({ fine: v })}
-		/>
-		<Knob
-			label="level"
-			value={osc.level}
-			min={-40}
-			max={6}
-			step={1}
-			size={36}
-			unit=" dB"
-			onchange={(v) => set({ level: v })}
-		/>
+	<!-- Row 1: oct, semi, level, uni -->
+	<div class="flex shrink-0 items-end justify-around gap-1">
+		<Knob label="oct" value={osc.octave} min={-3} max={3} step={1} size={28}
+			format={(v) => (v > 0 ? `+${v}` : `${v}`)} onchange={(v) => set({ octave: v })} />
+		<Knob label="semi" value={osc.semi} min={-12} max={12} step={1} size={28}
+			format={(v) => (v > 0 ? `+${v}` : `${v}`)} onchange={(v) => set({ semi: v })} />
+		<Knob label="level" value={osc.level} min={-40} max={6} step={1} size={28} unit=" dB"
+			onchange={(v) => set({ level: v })} />
+		<Knob label="uni" value={osc.unison} min={1} max={8} step={1} size={28}
+			format={(v) => `${v}v`} onchange={(v) => set({ unison: v })} />
+	</div>
+	<!-- Row 2: fine, spread, width -->
+	<div class="flex shrink-0 items-end justify-around gap-1">
+		<Knob label="fine" value={osc.fine} min={-50} max={50} step={1} size={28} unit=" ct"
+			onchange={(v) => set({ fine: v })} />
+		<div class:opacity-30={osc.unison <= 1 || osc.type === 'pulse'}>
+			<Knob label="spread" value={osc.spread} min={0} max={200} step={1} size={28} unit=" ct"
+				onchange={(v) => set({ spread: v })} />
+		</div>
+		<div class:opacity-30={osc.type !== 'pulse'}>
+			<Knob label="width" value={osc.width} min={0} max={1} step={0.01} size={28}
+				format={(v) => `${Math.round(v * 100)}%`} onchange={(v) => set({ width: v })} />
+		</div>
 	</div>
 </section>
