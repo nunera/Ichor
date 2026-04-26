@@ -13,6 +13,7 @@
 	import StrudelDrawer from '$lib/ui/StrudelDrawer.svelte';
 	import EffectsDrawer from '$lib/ui/EffectsDrawer.svelte';
 	import MIDIIndicator from '$lib/ui/MIDIIndicator.svelte';
+	import Guide from '$lib/ui/Guide.svelte';
 	import CursorLayer from '$lib/ui/CursorLayer.svelte';
 
 	let volume = $state(-12);
@@ -81,6 +82,7 @@
 		</div>
 
 		<div class="relative flex items-center gap-3 pr-8">
+			<Guide />
 			<MIDIIndicator />
 			<BrowseSessions />
 			<SessionBadge />

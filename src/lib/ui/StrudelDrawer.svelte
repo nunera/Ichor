@@ -2,6 +2,7 @@
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { strudel } from '$lib/audio/strudel.svelte';
+	import { Play, Pause, Square as StopIcon } from 'lucide-svelte';
 
 	// Use dynamic import for CodeMirror to prevent SSR issues
 	import { onMount } from 'svelte';
@@ -91,26 +92,29 @@
 
 			<div class="flex items-center gap-1 text-[11px]">
 				<button
-					class="rounded bg-mauve px-3 py-1 text-base transition-opacity hover:opacity-90"
+					class="flex items-center gap-1 rounded bg-mauve px-3 py-1 text-base transition-opacity hover:opacity-90"
 					onclick={play}
-					title="play"
+					title="play (cmd/ctrl + enter)"
 				>
-					▶ play
+					<Play size={12} fill="currentColor" />
+					play
 				</button>
 				<button
-					class="rounded border border-surface1 bg-surface0 px-2 py-1 text-subtext1 transition-colors hover:bg-surface1 hover:text-text"
+					class="flex h-7 w-7 items-center justify-center rounded border border-surface1 bg-surface0 text-subtext1 transition-colors hover:bg-surface1 hover:text-text disabled:opacity-40"
 					onclick={pause}
 					disabled={!strudel.playing}
 					title="pause"
+					aria-label="pause"
 				>
-					⏸
+					<Pause size={12} fill="currentColor" />
 				</button>
 				<button
-					class="rounded border border-surface1 bg-surface0 px-2 py-1 text-subtext1 transition-colors hover:bg-surface1 hover:text-red"
+					class="flex h-7 w-7 items-center justify-center rounded border border-surface1 bg-surface0 text-subtext1 transition-colors hover:bg-surface1 hover:text-red"
 					onclick={stop}
 					title="stop"
+					aria-label="stop"
 				>
-					⏹
+					<StopIcon size={12} fill="currentColor" />
 				</button>
 			</div>
 		</header>
