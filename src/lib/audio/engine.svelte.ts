@@ -59,15 +59,18 @@ class AudioEngine {
 	started = $state(false);
 	patch = $state<Patch>(structuredClone(defaultPatch));
 
-	#osc1: Tone.PolySynth | null = null;
-	#osc2: Tone.PolySynth | null = null;
+	// PolySynth wraps a voice class (Tone.Synth, Tone.FMSynth, Tone.AMSynth, Tone.PluckSynth).
+	// We use `any` because the voice class type changes when synthType is swapped.
+	#osc1: Tone.PolySynth<any> | null = null;
+	#osc2: Tone.PolySynth<any> | null = null;
 	#sub: Tone.PolySynth | null = null;
 	// Parallel mono synths used by legato/porta/scale modes — needed because
 	// PolySynth allocates a fresh voice per triggerAttack, leaving portamento
 	// nothing to glide from. A single Tone.Synth voice glides between
 	// consecutive triggerAttacks.
-	#osc1Mono: Tone.Synth | null = null;
-	#osc2Mono: Tone.Synth | null = null;
+	// Mono companions for glide modes — also shape-shift when synthType changes.
+	#osc1Mono: any | null = null;
+	#osc2Mono: any | null = null;
 	#subMono: Tone.Synth | null = null;
 	#osc1Gain: Tone.Gain | null = null;
 	#osc2Gain: Tone.Gain | null = null;
@@ -204,16 +207,16 @@ class AudioEngine {
 		this.#noise = new Tone.Noise(this.patch.noise.type).connect(this.#noiseEnv);
 		this.#noise.start();
 
-		this.#osc1 = new Tone.PolySynth(Tone.Synth).connect(this.#osc1Gain);
-		this.#osc2 = new Tone.PolySynth(Tone.Synth).connect(this.#osc2Gain);
+		this.#osc1 = this.#createPolySynth(this.patch.osc1.synthType).connect(this.#osc1Gain);
+		this.#osc2 = this.#createPolySynth(this.patch.osc2.synthType).connect(this.#osc2Gain);
 		this.#sub = new Tone.PolySynth(Tone.Synth).connect(this.#subGain);
 		this.#sub.set({
 			oscillator: { type: this.patch.sub.type } as any,
 			detune: this.patch.sub.octave * 1200
 		});
-		// Mono companions, sharing gain/filter routing. Routed in parallel.
-		this.#osc1Mono = new Tone.Synth().connect(this.#osc1Gain);
-		this.#osc2Mono = new Tone.Synth().connect(this.#osc2Gain);
+		// Mono companions for glide modes — synth class mirrors the poly engine.
+		this.#osc1Mono = this.#createMonoSynth(this.patch.osc1.synthType).connect(this.#osc1Gain);
+		this.#osc2Mono = this.#createMonoSynth(this.patch.osc2.synthType).connect(this.#osc2Gain);
 		this.#subMono = new Tone.Synth().connect(this.#subGain);
 
 		const d = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
@@ -294,25 +297,159 @@ class AudioEngine {
 		return { type: osc.type };
 	}
 
+	/** Voice class for a given synth engine. */
+	#voiceClass(synthType: OscPatch['synthType']): any {
+		switch (synthType) {
+			case 'fm':
+				return Tone.FMSynth;
+			case 'am':
+				return Tone.AMSynth;
+			case 'pluck':
+				return Tone.PluckSynth;
+			default:
+				return Tone.Synth;
+		}
+	}
+
+	/**
+	 * Build a fresh poly synth for the given engine type. PluckSynth doesn't
+	 * support polyphony as smoothly but PolySynth still wraps it.
+	 */
+	#createPolySynth(synthType: OscPatch['synthType']): Tone.PolySynth<any> {
+		return new Tone.PolySynth(this.#voiceClass(synthType));
+	}
+
+	/**
+	 * Build a fresh mono voice for glide modes. PluckSynth glides oddly so we
+	 * still create one; envelope/portamento behaviour will reflect Tone defaults.
+	 */
+	#createMonoSynth(synthType: OscPatch['synthType']): any {
+		const Cls = this.#voiceClass(synthType);
+		return new Cls();
+	}
+
+	/**
+	 * Apply per-engine settings (oscillator shape, FM/AM ratio + index, Pluck
+	 * dampening, etc.) to a poly synth.
+	 */
+	#applyOscEngineSettings(synth: Tone.PolySynth<any> | null, osc: OscPatch) {
+		if (!synth) return;
+		const detune = this.#detuneCents(osc);
+		switch (osc.synthType) {
+			case 'fm':
+				synth.set({
+					harmonicity: osc.harmonicity,
+					modulationIndex: osc.modIndex,
+					oscillator: { type: osc.type } as any,
+					modulation: { type: osc.type } as any,
+					detune
+				} as any);
+				break;
+			case 'am':
+				synth.set({
+					harmonicity: osc.harmonicity,
+					oscillator: { type: osc.type } as any,
+					modulation: { type: osc.type } as any,
+					detune
+				} as any);
+				break;
+			case 'pluck':
+				// PluckSynth params: attackNoise (0..1+), dampening (Hz), resonance.
+				synth.set({
+					attackNoise: 0.5 + osc.pluckAttack * 5,
+					dampening: osc.pluckDamp,
+					resonance: 0.7
+				} as any);
+				// Pluck doesn't use detune at the synth level, but we set it
+				// anyway in case future versions support it; harmless if ignored.
+				break;
+			default: {
+				const o = this.#buildOscOptions(osc) as any;
+				synth.set({ oscillator: o, detune });
+			}
+		}
+	}
+
+	/** Same as above but for the mono companion (single voice, no PolySynth). */
+	#applyMonoEngineSettings(mono: any, osc: OscPatch) {
+		if (!mono) return;
+		const detune = this.#detuneCents(osc);
+		switch (osc.synthType) {
+			case 'fm':
+				mono.set?.({
+					harmonicity: osc.harmonicity,
+					modulationIndex: osc.modIndex,
+					oscillator: { type: osc.type },
+					modulation: { type: osc.type },
+					detune
+				});
+				break;
+			case 'am':
+				mono.set?.({
+					harmonicity: osc.harmonicity,
+					oscillator: { type: osc.type },
+					modulation: { type: osc.type },
+					detune
+				});
+				break;
+			case 'pluck':
+				mono.set?.({
+					attackNoise: 0.5 + osc.pluckAttack * 5,
+					dampening: osc.pluckDamp,
+					resonance: 0.7
+				});
+				break;
+			default: {
+				// Tone.Synth doesn't accept fat*/pulse; fall back to base waveform.
+				const monoType = osc.type === 'pulse' ? 'square' : osc.type;
+				mono.set?.({ oscillator: { type: monoType }, detune });
+			}
+		}
+	}
+
 	#applyOscSettings() {
-		const o1 = this.#buildOscOptions(this.patch.osc1) as any;
-		const o2 = this.#buildOscOptions(this.patch.osc2) as any;
-		this.#osc1?.set({ oscillator: o1, detune: this.#detuneCents(this.patch.osc1) });
-		this.#osc2?.set({ oscillator: o2, detune: this.#detuneCents(this.patch.osc2) });
-		// Mono Tone.Synth doesn't accept fat*/pulse — fall back to base type.
-		const monoType = (osc: OscPatch) => (osc.type === 'pulse' ? 'square' : osc.type);
-		this.#osc1Mono?.set({
-			oscillator: { type: monoType(this.patch.osc1) } as any,
-			detune: this.#detuneCents(this.patch.osc1)
-		});
-		this.#osc2Mono?.set({
-			oscillator: { type: monoType(this.patch.osc2) } as any,
-			detune: this.#detuneCents(this.patch.osc2)
-		});
+		this.#applyOscEngineSettings(this.#osc1, this.patch.osc1);
+		this.#applyOscEngineSettings(this.#osc2, this.patch.osc2);
+		this.#applyMonoEngineSettings(this.#osc1Mono, this.patch.osc1);
+		this.#applyMonoEngineSettings(this.#osc2Mono, this.patch.osc2);
 		this.#subMono?.set({
 			oscillator: { type: this.patch.sub.type } as any,
 			detune: this.patch.sub.octave * 1200
 		});
+	}
+
+	/**
+	 * Swap the synth class for an oscillator slot when synthType changes.
+	 * Disposes the old synths, builds new ones, reapplies envelope + settings,
+	 * reconnects to the gain node. Brief audio gap is unavoidable but minimal.
+	 */
+	#rebuildOscSynth(which: 'osc1' | 'osc2') {
+		const osc = this.patch[which];
+		const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
+		if (!gain) return;
+
+		const oldPoly = which === 'osc1' ? this.#osc1 : this.#osc2;
+		const oldMono = which === 'osc1' ? this.#osc1Mono : this.#osc2Mono;
+		oldPoly?.releaseAll();
+		oldPoly?.dispose();
+		oldMono?.triggerRelease?.();
+		oldMono?.dispose?.();
+
+		const poly = this.#createPolySynth(osc.synthType).connect(gain);
+		const mono = this.#createMonoSynth(osc.synthType).connect(gain);
+
+		if (which === 'osc1') {
+			this.#osc1 = poly;
+			this.#osc1Mono = mono;
+		} else {
+			this.#osc2 = poly;
+			this.#osc2Mono = mono;
+		}
+
+		// Re-apply envelope and engine settings to the freshly built synths.
+		this.#applyEnvelope();
+		this.#applyOscEngineSettings(poly, osc);
+		this.#applyMonoEngineSettings(mono, osc);
 	}
 
 	#applyEnvelope() {
@@ -334,11 +471,17 @@ class AudioEngine {
 			sustain: e.sustain,
 			release: e.release
 		};
-		this.#osc1?.set({ envelope: env });
-		this.#osc2?.set({ envelope: env });
+		// PluckSynth has no AHDSR envelope (it's percussive/physical). Skip
+		// applying envelope to slots running pluck so we don't throw.
+		if (this.patch.osc1.synthType !== 'pluck') {
+			this.#osc1?.set({ envelope: env } as any);
+			this.#osc1Mono?.set?.({ envelope: env });
+		}
+		if (this.patch.osc2.synthType !== 'pluck') {
+			this.#osc2?.set({ envelope: env } as any);
+			this.#osc2Mono?.set?.({ envelope: env });
+		}
 		this.#sub?.set({ envelope: env });
-		this.#osc1Mono?.set({ envelope: env });
-		this.#osc2Mono?.set({ envelope: env });
 		this.#subMono?.set({ envelope: env });
 		// Noise uses a separate envelope; mirror the same AHDSR.
 		if (this.#noiseEnv) {
@@ -383,18 +526,39 @@ class AudioEngine {
 
 	#applyOsc(which: 'osc1' | 'osc2', p: Partial<OscPatch>) {
 		const target = this.patch[which];
-		const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
 		const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
 
-		const oscChanged =
+		// Synth engine swap: dispose+rebuild both poly and mono, reapply
+		// envelope/settings, then return — no other knobs need handling here
+		// because the rebuilder calls applyOscEngineSettings.
+		if (p.synthType !== undefined) {
+			this.#rebuildOscSynth(which);
+			return;
+		}
+
+		const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+		const mono = which === 'osc1' ? this.#osc1Mono : this.#osc2Mono;
+
+		// Engine-aware oscillator/parameter changes. We delegate to the
+		// per-engine appliers so FM/AM/Pluck-specific fields update correctly.
+		const engineParamChanged =
 			p.type !== undefined ||
 			p.unison !== undefined ||
 			p.spread !== undefined ||
-			p.width !== undefined;
-		if (oscChanged) synth?.set({ oscillator: this.#buildOscOptions(target) as any });
+			p.width !== undefined ||
+			p.harmonicity !== undefined ||
+			p.modIndex !== undefined ||
+			p.pluckAttack !== undefined ||
+			p.pluckDamp !== undefined;
+		if (engineParamChanged) {
+			this.#applyOscEngineSettings(synth, target);
+			this.#applyMonoEngineSettings(mono, target);
+		}
 
 		if (p.octave !== undefined || p.semi !== undefined || p.fine !== undefined) {
-			synth?.set({ detune: this.#detuneCents(target) });
+			const detune = this.#detuneCents(target);
+			synth?.set({ detune });
+			if (mono?.detune) mono.detune.value = detune;
 		}
 		if (p.level !== undefined || p.enabled !== undefined) {
 			const t = target.enabled ? Tone.dbToGain(target.level) : 0;

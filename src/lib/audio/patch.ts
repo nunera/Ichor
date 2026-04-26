@@ -16,19 +16,34 @@ import { z } from 'zod';
 export const Waveform = z.enum(['sine', 'square', 'sawtooth', 'triangle', 'pulse']);
 export type Waveform = z.infer<typeof Waveform>;
 
+/** Synthesis engine for an oscillator slot. Each engine uses a different
+ *  Tone.js synth class under the hood and exposes different params. */
+export const SynthType = z.enum(['basic', 'fm', 'am', 'pluck']);
+export type SynthType = z.infer<typeof SynthType>;
+
 export const OscPatchSchema = z.object({
+	/** Which synthesis engine this oscillator slot uses. */
+	synthType: SynthType.default('basic'),
 	type: Waveform,
 	level: z.number().min(-60).max(12),
 	octave: z.number().int().min(-3).max(3),
 	semi: z.number().int().min(-12).max(12),
 	fine: z.number().min(-50).max(50),
 	enabled: z.boolean(),
-	/** Unison voice count (1 = off). fat* oscillator when >1. */
+	/** Unison voice count (1 = off). fat* oscillator when >1. (basic only) */
 	unison: z.number().int().min(1).max(8).default(1),
-	/** Unison detune spread in cents (active when unison > 1). */
+	/** Unison detune spread in cents (active when unison > 1). (basic only) */
 	spread: z.number().min(0).max(200).default(0),
-	/** Pulse width 0–1 (only affects pulse waveform). */
-	width: z.number().min(0).max(1).default(0.5)
+	/** Pulse width 0–1 (only affects pulse waveform). (basic only) */
+	width: z.number().min(0).max(1).default(0.5),
+	/** FM/AM: modulator-to-carrier frequency ratio. */
+	harmonicity: z.number().min(0.1).max(20).default(1),
+	/** FM only: amount of modulator-to-carrier frequency modulation. */
+	modIndex: z.number().min(0).max(50).default(10),
+	/** Pluck: sharpness of the initial pluck attack noise (0=soft, 1=hard). */
+	pluckAttack: z.number().min(0).max(1).default(0.7),
+	/** Pluck: high-frequency dampening of the simulated string (0=bright, 1=mellow). */
+	pluckDamp: z.number().min(0).max(7000).default(4000)
 });
 export type OscPatch = z.infer<typeof OscPatchSchema>;
 
@@ -189,6 +204,7 @@ export type PatchInput = z.input<typeof PatchSchema>;
 
 export const defaultPatch: Patch = {
 	osc1: {
+		synthType: 'basic',
 		type: 'sawtooth',
 		level: 0,
 		octave: 0,
@@ -197,9 +213,14 @@ export const defaultPatch: Patch = {
 		enabled: true,
 		unison: 1,
 		spread: 0,
-		width: 0.5
+		width: 0.5,
+		harmonicity: 1,
+		modIndex: 10,
+		pluckAttack: 0.7,
+		pluckDamp: 4000
 	},
 	osc2: {
+		synthType: 'basic',
 		type: 'square',
 		level: -6,
 		octave: 0,
@@ -208,7 +229,11 @@ export const defaultPatch: Patch = {
 		enabled: true,
 		unison: 1,
 		spread: 0,
-		width: 0.5
+		width: 0.5,
+		harmonicity: 1,
+		modIndex: 10,
+		pluckAttack: 0.7,
+		pluckDamp: 4000
 	},
 	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
 	filter: { cutoff: 4000, resonance: 2, type: 'lowpass' },
