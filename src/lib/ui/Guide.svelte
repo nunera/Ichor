@@ -337,7 +337,7 @@
 					<div class="flex items-center gap-3">
 						<HeaderIcon size={28} class="text-mauve" />
 						<div>
-							<h3 class="font-medium text-base text-text">{lesson.title}</h3>
+							<h3 class="text-[16px] font-medium text-text">{lesson.title}</h3>
 							<p class="text-[10px] tracking-widest text-overlay1 uppercase">
 								lesson {lessonIndex + 1} of {lessons.length}
 							</p>

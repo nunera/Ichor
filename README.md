@@ -18,19 +18,48 @@
 
 ## Status
 
-**Layer 1 — sound design.** A playable Serum-inspired synth in the browser:
+**Layer 2 — sound design + effects + live coding.** A playable, hackable synth in the browser:
 
-- Two oscillators (sine / square / saw / triangle) with octave / semi / fine detune, level, enable
+### Synthesis
+
+- Two oscillators with **swappable engines**: BASIC (subtractive), FM, AM, and PLUCK (Karplus-Strong)
+- Waveforms: sine / square / saw / triangle / pulse (with adjustable width)
+- Per-osc octave / semi / fine detune, level, pan, enable
+- **Unison** (1–7 voices) with stereo spread for fat supersaws (BASIC engine)
+- **Sub oscillator** (1 or 2 octaves below) for added low-end weight
+- **Noise generator** (white / pink / brown) with level + pan
 - AHDSR envelope with a draggable visual editor and matching knobs
-- Lowpass filter (24 dB) with cutoff + resonance
-- LFO → cutoff with rate, depth, enable
+- Multi-mode filter (lowpass / highpass / bandpass / notch) with cutoff + resonance
+- LFO → cutoff with rate, depth, shape (sine / square / saw), enable
+- **Voice modes:** poly / mono / legato / scale, with glide time
+  - Glide implemented via parallel mono `Tone.Synth` instances (PolySynth doesn't support portamento)
+  - Pluck voicing uses a per-note `PluckSynth` Map (PluckSynth isn't `Monophonic`)
+
+### Effects rack (right drawer)
+
+- Distortion, Bitcrusher, Chorus, Ping-Pong Delay, Reverb
+- Each with wet/dry mix and individual enable; chained left-to-right
+- All effect params are addressable from Strudel patterns
+
+### Performance & I/O
+
 - Multi-octave keyboard (3 octaves) with mouse glissando, two rows of keybinds (`a–j` / `k–'`), `z` / `x` to shift octave
-- Live oscilloscope + spectrum analyser as the page header background, toggle in the top-left
-- 30+ built-in presets in a floating, physics-based picker (drag nodes, hover to highlight category connections, click to load)
-- Live JSON patch editor (Cmd/Ctrl-S to apply) tucked behind a sliding trapezoid flag on the left edge
-- Three Catppuccin themes: **latte**, **mocha**, **sky** (mocha with a sky-blue accent + purple secondary)
+- **Pitch bend wheel** (±2 semitones, springs back) and **mod wheel** (boosts LFO depth)
+- **Web MIDI** input support
+
+### UI
+
+- Live oscilloscope + spectrum analyser as the page header background
+- 300+ built-in presets in a floating, physics-based picker (drag, hover, click to load)
+- Live JSON patch editor on the left, **Strudel** + **Effects** drawers on the right — all built on **CodeMirror 6** with custom Catppuccin highlighting
+- Three Catppuccin themes: **latte**, **mocha**, **sky**
+- **Beginner's guide** modal: 15 lessons with embedded interactive visualizers (knob, waveform, envelope, filter)
+- Lucide icons throughout
+
+### Networking & live coding
+
 - **Live multiplayer sessions** via Cloudflare Durable Objects: click "share" → get a URL → anyone who opens it edits the same patch in real time, with presence count
-- **Live coding / Sequencing** via `@strudel/core`: write patterns in a side drawer (e.g. `note("c3 eb3 g3 bb3").s("ichor").slow(4)`), and a custom lookahead scheduler feeds it into the synth in real time.
+- **Live coding** via a custom Strudel lookahead scheduler (bypassing broken `@kabelsalat` internals): write patterns like `note("c3 eb3 g3 bb3").s("ichor").cutoff(sine.range(0.1, 0.9))` in the side drawer; every synth + effect param is a Strudel-addressable channel.
 
 ---
 
@@ -122,17 +151,24 @@ src/
       PatchSession.ts       # Durable Object: holds canonical patch, fans out updates
     audio/
       session.svelte.ts     # Client-side websocket sync, coalesced per-frame
+    audio/
+      strudel.svelte.ts     # Custom lookahead scheduler + param routing
     ui/
       Keyboard.svelte       # Multi-octave keyboard, glissando, octave shift
       SoundDesign.svelte    # Two-row grid: osc1 / osc2 / filter then env / lfo
-      OscCard.svelte        # Per-osc waveform display + 4 knobs
+      OscCard.svelte        # Per-osc swappable engine UI (BASIC/FM/AM/Pluck)
       Envelope.svelte       # Draggable AHDSR + knob row, ResizeObserver-sized SVG
       LFOWave.svelte        # Inline LFO shape preview
       Knob.svelte           # Circular knob (drag, wheel, dblclick, exponential curves)
       Visualizer.svelte     # Canvas oscilloscope + spectrum, theme-aware
       ThemeToggle.svelte    # latte / mocha / sky picker
-      PatchEditor.svelte    # Sliding drawer + trapezoid flag, live JSON
-      PresetCloud.svelte    # Verlet-physics preset picker, lives in the blur space
+      PatchEditor.svelte    # CodeMirror 6 JSON editor in a sliding drawer
+      StrudelDrawer.svelte  # CodeMirror 6 live coding drawer
+      EffectsDrawer.svelte  # Distortion / bitcrusher / chorus / delay / reverb
+      PitchModWheels.svelte # Pitch bend (sprung) + mod wheel
+      PresetCloud.svelte    # Verlet-physics preset picker
+      Guide.svelte          # 15-lesson beginner modal w/ live visualizers
+      guide/                # GuideKnob, GuideWave, GuideEnvelope, GuideFilter
   routes/
     +page.svelte         # Layout: full-bleed visualizer header → controls → keys
     layout.css           # Catppuccin tokens (latte / mocha / sky)
@@ -143,11 +179,14 @@ src/
 - **Single source of truth.** `audio.patch` is `$state`; every UI input goes
   through a validated setter (`audio.setOsc1`, `setEnvelope`, …) that runs
   the input through Zod before mutating state or touching the audio graph.
-- **Write-source tagging.** Every setter accepts `'ui' | 'editor' | 'remote' | 'midi'`.
-  The JSON editor and (eventually) network sync subscribe to writes and
-  filter out their own source tag to prevent echo loops.
-- **`audio.subscribe(fn)`** emits a `WriteEvent` after every change. This is
-  the surface bidirectional sync (URL hash, websockets, Strudel) will hook into.
+- **Write-source tagging.** Every setter accepts `'ui' | 'editor' | 'remote' | 'midi' | 'strudel'`.
+  Subscribers (JSON editor, websocket sync, Strudel) filter out their own
+  source tag to prevent echo loops.
+- **Partial-update gotcha.** Zod's `.default()` triggers on _missing_ keys,
+  which silently reset sibling params during partial updates. `validateSection`
+  filters the parsed output back down to the originally provided keys.
+- **`audio.subscribe(fn)`** emits a `WriteEvent` after every change — the
+  hook surface for bidirectional sync (URL hash, websockets, Strudel).
 - **`audio.loadPatch(value, source)`** atomically validates and applies a full patch.
 
 ---
@@ -168,9 +207,7 @@ pnpm dlx sv@0.15.1 create --template minimal --types ts \
 
 Built in public, in small increments. The rough direction, loosest to firmest:
 
-- **next:** Strudel param hook (sequencing handled externally)
-- effects rack (reverb, delay, distortion, eq, comp)
-- pitch bend + mod wheel, Web MIDI
+- **next:** patch persistence (save your own presets to localStorage / cloud)
 - sampling (mic, file, tab capture)
 - export (WAV / MP3 / stems / MIDI)
 - granular / FM / wavetable synths
