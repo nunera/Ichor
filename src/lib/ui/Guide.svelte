@@ -299,11 +299,11 @@
 
 	<!-- Modal -->
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
+		class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4"
 		transition:scale={{ duration: 220, start: 0.96, easing: cubicOut }}
 	>
 		<div
-			class="flex h-[min(80vh,640px)] w-[min(56rem,95vw)] overflow-hidden rounded-2xl border border-surface1 bg-mantle shadow-2xl"
+			class="pointer-events-auto flex h-[min(80vh,640px)] w-[min(56rem,95vw)] overflow-hidden rounded-2xl border border-surface1 bg-mantle shadow-2xl"
 			role="dialog"
 			aria-label="ichor guide"
 		>
