@@ -43,7 +43,9 @@ export const OscPatchSchema = z.object({
 	/** Pluck: sharpness of the initial pluck attack noise (0=soft, 1=hard). */
 	pluckAttack: z.number().min(0).max(1).default(0.7),
 	/** Pluck: high-frequency dampening of the simulated string (0=bright, 1=mellow). */
-	pluckDamp: z.number().min(0).max(7000).default(4000)
+	pluckDamp: z.number().min(0).max(7000).default(4000),
+	/** Pluck: feedback / sustain of the simulated string (0=thunk, ~0.99=long ringing). */
+	pluckResonance: z.number().min(0).max(0.99).default(0.7)
 });
 export type OscPatch = z.infer<typeof OscPatchSchema>;
 
@@ -217,7 +219,8 @@ export const defaultPatch: Patch = {
 		harmonicity: 1,
 		modIndex: 10,
 		pluckAttack: 0.7,
-		pluckDamp: 4000
+		pluckDamp: 4000,
+		pluckResonance: 0.7
 	},
 	osc2: {
 		synthType: 'basic',
@@ -233,7 +236,8 @@ export const defaultPatch: Patch = {
 		harmonicity: 1,
 		modIndex: 10,
 		pluckAttack: 0.7,
-		pluckDamp: 4000
+		pluckDamp: 4000,
+		pluckResonance: 0.7
 	},
 	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
 	filter: { cutoff: 4000, resonance: 2, type: 'lowpass' },

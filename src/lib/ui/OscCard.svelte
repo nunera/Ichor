@@ -319,6 +319,16 @@
 				format={(v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`)}
 				onchange={(v) => set({ pluckDamp: v })}
 			/>
+			<Knob
+				label="reso"
+				value={osc.pluckResonance}
+				min={0}
+				max={0.99}
+				step={0.01}
+				size={28}
+				format={(v) => `${Math.round(v * 100)}%`}
+				onchange={(v) => set({ pluckResonance: v })}
+			/>
 		</div>
 	{/if}
 </section>

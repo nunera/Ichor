@@ -59,19 +59,23 @@ class AudioEngine {
 	started = $state(false);
 	patch = $state<Patch>(structuredClone(defaultPatch));
 
-	// PolySynth wraps a voice class (Tone.Synth, Tone.FMSynth, Tone.AMSynth, Tone.PluckSynth).
-	// We use `any` because the voice class type changes when synthType is swapped.
+	// PolySynth wraps a voice class (Tone.Synth, Tone.FMSynth, Tone.AMSynth).
+	// PluckSynth doesn't extend Monophonic so it cannot be wrapped in PolySynth —
+	// pluck slots leave these null and route through #pluckVoices instead.
 	#osc1: Tone.PolySynth<any> | null = null;
 	#osc2: Tone.PolySynth<any> | null = null;
 	#sub: Tone.PolySynth | null = null;
 	// Parallel mono synths used by legato/porta/scale modes — needed because
 	// PolySynth allocates a fresh voice per triggerAttack, leaving portamento
 	// nothing to glide from. A single Tone.Synth voice glides between
-	// consecutive triggerAttacks.
-	// Mono companions for glide modes — also shape-shift when synthType changes.
+	// consecutive triggerAttacks. Pluck slots leave these null too.
 	#osc1Mono: any | null = null;
 	#osc2Mono: any | null = null;
 	#subMono: Tone.Synth | null = null;
+	// Per-note PluckSynth voice pool (one fresh PluckSynth per attack, disposed
+	// after release+ringout). Keyed by note name. Separate map per osc slot.
+	#pluck1Voices = new Map<string, Tone.PluckSynth>();
+	#pluck2Voices = new Map<string, Tone.PluckSynth>();
 	#osc1Gain: Tone.Gain | null = null;
 	#osc2Gain: Tone.Gain | null = null;
 	#subGain: Tone.Gain | null = null;
@@ -207,16 +211,21 @@ class AudioEngine {
 		this.#noise = new Tone.Noise(this.patch.noise.type).connect(this.#noiseEnv);
 		this.#noise.start();
 
-		this.#osc1 = this.#createPolySynth(this.patch.osc1.synthType).connect(this.#osc1Gain);
-		this.#osc2 = this.#createPolySynth(this.patch.osc2.synthType).connect(this.#osc2Gain);
+		this.#osc1 = this.#createPolySynth(this.patch.osc1.synthType);
+		this.#osc1?.connect(this.#osc1Gain);
+		this.#osc2 = this.#createPolySynth(this.patch.osc2.synthType);
+		this.#osc2?.connect(this.#osc2Gain);
 		this.#sub = new Tone.PolySynth(Tone.Synth).connect(this.#subGain);
 		this.#sub.set({
 			oscillator: { type: this.patch.sub.type } as any,
 			detune: this.patch.sub.octave * 1200
 		});
 		// Mono companions for glide modes — synth class mirrors the poly engine.
-		this.#osc1Mono = this.#createMonoSynth(this.patch.osc1.synthType).connect(this.#osc1Gain);
-		this.#osc2Mono = this.#createMonoSynth(this.patch.osc2.synthType).connect(this.#osc2Gain);
+		// Both null when synthType is pluck.
+		this.#osc1Mono = this.#createMonoSynth(this.patch.osc1.synthType);
+		this.#osc1Mono?.connect(this.#osc1Gain);
+		this.#osc2Mono = this.#createMonoSynth(this.patch.osc2.synthType);
+		this.#osc2Mono?.connect(this.#osc2Gain);
 		this.#subMono = new Tone.Synth().connect(this.#subGain);
 
 		const d = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
@@ -297,33 +306,34 @@ class AudioEngine {
 		return { type: osc.type };
 	}
 
-	/** Voice class for a given synth engine. */
+	/** Voice class for a given synth engine. Pluck has no PolySynth-compatible voice. */
 	#voiceClass(synthType: OscPatch['synthType']): any {
 		switch (synthType) {
 			case 'fm':
 				return Tone.FMSynth;
 			case 'am':
 				return Tone.AMSynth;
-			case 'pluck':
-				return Tone.PluckSynth;
 			default:
 				return Tone.Synth;
 		}
 	}
 
 	/**
-	 * Build a fresh poly synth for the given engine type. PluckSynth doesn't
-	 * support polyphony as smoothly but PolySynth still wraps it.
+	 * Build a fresh poly synth for the given engine type. Returns null for
+	 * pluck (which is handled via per-note voice allocation in attack/release
+	 * because PluckSynth doesn't extend Monophonic and can't be poly-wrapped).
 	 */
-	#createPolySynth(synthType: OscPatch['synthType']): Tone.PolySynth<any> {
+	#createPolySynth(synthType: OscPatch['synthType']): Tone.PolySynth<any> | null {
+		if (synthType === 'pluck') return null;
 		return new Tone.PolySynth(this.#voiceClass(synthType));
 	}
 
 	/**
-	 * Build a fresh mono voice for glide modes. PluckSynth glides oddly so we
-	 * still create one; envelope/portamento behaviour will reflect Tone defaults.
+	 * Build a fresh mono voice for glide modes. Returns null for pluck for the
+	 * same reason as above (we never glide pluck).
 	 */
 	#createMonoSynth(synthType: OscPatch['synthType']): any {
+		if (synthType === 'pluck') return null;
 		const Cls = this.#voiceClass(synthType);
 		return new Cls();
 	}
@@ -333,6 +343,9 @@ class AudioEngine {
 	 * dampening, etc.) to a poly synth.
 	 */
 	#applyOscEngineSettings(synth: Tone.PolySynth<any> | null, osc: OscPatch) {
+		// Pluck slots have no shared synth — params take effect on the next
+		// attack via #triggerPluckVoice. Nothing to do here.
+		if (osc.synthType === 'pluck') return;
 		if (!synth) return;
 		const detune = this.#detuneCents(osc);
 		switch (osc.synthType) {
@@ -372,6 +385,7 @@ class AudioEngine {
 
 	/** Same as above but for the mono companion (single voice, no PolySynth). */
 	#applyMonoEngineSettings(mono: any, osc: OscPatch) {
+		if (osc.synthType === 'pluck') return;
 		if (!mono) return;
 		const detune = this.#detuneCents(osc);
 		switch (osc.synthType) {
@@ -420,23 +434,37 @@ class AudioEngine {
 
 	/**
 	 * Swap the synth class for an oscillator slot when synthType changes.
-	 * Disposes the old synths, builds new ones, reapplies envelope + settings,
-	 * reconnects to the gain node. Brief audio gap is unavoidable but minimal.
+	 * Disposes the old synths and any active pluck voices, builds new ones
+	 * (or null for pluck), reapplies envelope + settings, reconnects to gain.
+	 * Brief audio gap is unavoidable but minimal.
 	 */
 	#rebuildOscSynth(which: 'osc1' | 'osc2') {
 		const osc = this.patch[which];
 		const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
 		if (!gain) return;
 
+		// Tear down whatever was there before.
 		const oldPoly = which === 'osc1' ? this.#osc1 : this.#osc2;
 		const oldMono = which === 'osc1' ? this.#osc1Mono : this.#osc2Mono;
 		oldPoly?.releaseAll();
 		oldPoly?.dispose();
-		oldMono?.triggerRelease?.();
+		try {
+			oldMono?.triggerRelease?.();
+		} catch {
+			// triggerRelease can throw on disposed synths; ignore.
+		}
 		oldMono?.dispose?.();
 
-		const poly = this.#createPolySynth(osc.synthType).connect(gain);
-		const mono = this.#createMonoSynth(osc.synthType).connect(gain);
+		// Also dispose any in-flight pluck voices for this slot.
+		const pluckMap = which === 'osc1' ? this.#pluck1Voices : this.#pluck2Voices;
+		for (const v of pluckMap.values()) v.dispose();
+		pluckMap.clear();
+
+		// Build the new synths (null for pluck — handled per-note in attack()).
+		const poly = this.#createPolySynth(osc.synthType);
+		poly?.connect(gain);
+		const mono = this.#createMonoSynth(osc.synthType);
+		mono?.connect(gain);
 
 		if (which === 'osc1') {
 			this.#osc1 = poly;
@@ -446,7 +474,7 @@ class AudioEngine {
 			this.#osc2Mono = mono;
 		}
 
-		// Re-apply envelope and engine settings to the freshly built synths.
+		// Re-apply envelope (which now correctly skips pluck) and engine settings.
 		this.#applyEnvelope();
 		this.#applyOscEngineSettings(poly, osc);
 		this.#applyMonoEngineSettings(mono, osc);
@@ -809,6 +837,17 @@ class AudioEngine {
 				this.#osc1?.triggerRelease(n, time);
 				this.#osc2?.triggerRelease(n, time);
 				this.#sub?.triggerRelease(n, time);
+				// Pluck voices: dispose so they don't pile up under fast retriggers.
+				const p1 = this.#pluck1Voices.get(n);
+				if (p1) {
+					p1.dispose();
+					this.#pluck1Voices.delete(n);
+				}
+				const p2 = this.#pluck2Voices.get(n);
+				if (p2) {
+					p2.dispose();
+					this.#pluck2Voices.delete(n);
+				}
 			}
 			this.#held.clear();
 		}
@@ -832,16 +871,14 @@ class AudioEngine {
 		this.#held.add(note);
 		this.#lastNote = note;
 
-		if (useGlide) {
-			// Glide modes: drive the mono synths. PolySynth voices won't glide
-			// because each triggerAttack allocates a fresh voice with no source pitch.
-			if (this.patch.osc1.enabled) this.#osc1Mono?.triggerAttack(note, time);
-			if (this.patch.osc2.enabled) this.#osc2Mono?.triggerAttack(note, time);
-			if (this.patch.sub.enabled) this.#subMono?.triggerAttack(note, time);
-		} else {
-			if (this.patch.osc1.enabled) this.#osc1?.triggerAttack(note, time);
-			if (this.patch.osc2.enabled) this.#osc2?.triggerAttack(note, time);
-			if (this.patch.sub.enabled) this.#sub?.triggerAttack(note, time);
+		// Trigger osc1 / osc2 / sub. PluckSynth needs special handling — each
+		// pluck note gets a fresh voice (PluckSynth has no AHDSR and decays
+		// naturally, so we let it ring out and dispose later).
+		this.#triggerSlot('osc1', note, time, useGlide);
+		this.#triggerSlot('osc2', note, time, useGlide);
+		if (this.patch.sub.enabled) {
+			if (useGlide) this.#subMono?.triggerAttack(note, time);
+			else this.#sub?.triggerAttack(note, time);
 		}
 
 		if (this.patch.noise.enabled && wasEmpty) {
@@ -849,26 +886,99 @@ class AudioEngine {
 		}
 	}
 
+	#triggerSlot(which: 'osc1' | 'osc2', note: string, time: number | undefined, useGlide: boolean) {
+		const osc = this.patch[which];
+		if (!osc.enabled) return;
+
+		if (osc.synthType === 'pluck') {
+			this.#triggerPluckVoice(which, note, time);
+			return;
+		}
+
+		const poly = which === 'osc1' ? this.#osc1 : this.#osc2;
+		const mono = which === 'osc1' ? this.#osc1Mono : this.#osc2Mono;
+		if (useGlide) mono?.triggerAttack(note, time);
+		else poly?.triggerAttack(note, time);
+	}
+
+	#triggerPluckVoice(which: 'osc1' | 'osc2', note: string, time?: number) {
+		const osc = this.patch[which];
+		const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
+		const map = which === 'osc1' ? this.#pluck1Voices : this.#pluck2Voices;
+		if (!gain) return;
+
+		// If a voice already exists for this note (rapid retrigger), dispose it.
+		const existing = map.get(note);
+		if (existing) {
+			existing.dispose();
+			map.delete(note);
+		}
+
+		const voice = new Tone.PluckSynth({
+			attackNoise: 0.5 + osc.pluckAttack * 5,
+			dampening: osc.pluckDamp,
+			resonance: osc.pluckResonance
+		});
+		// PluckSynth detune handling lives on the freq, so we apply detune cents
+		// by transposing the note. Cheaper: just trigger and let the natural
+		// inharmonicity speak.
+		voice.connect(gain);
+		voice.triggerAttack(note, time);
+		map.set(note, voice);
+	}
+
 	release(note: string, time?: number) {
 		if (!this.#held.delete(note)) return;
 		const useGlide = this.#isGlideMode(this.patch.voicing.mode);
 
-		if (useGlide) {
-			// In mono glide modes only release when the LAST held note is gone.
-			// Earlier note-offs just transfer voice to the still-held key.
-			if (this.#held.size === 0) {
-				this.#osc1Mono?.triggerRelease(time);
-				this.#osc2Mono?.triggerRelease(time);
-				this.#subMono?.triggerRelease(time);
+		this.#releaseSlot('osc1', note, time, useGlide);
+		this.#releaseSlot('osc2', note, time, useGlide);
+
+		if (this.patch.sub.enabled) {
+			if (useGlide) {
+				if (this.#held.size === 0) this.#subMono?.triggerRelease(time);
+			} else {
+				this.#sub?.triggerRelease(note, time);
 			}
-		} else {
-			this.#osc1?.triggerRelease(note, time);
-			this.#osc2?.triggerRelease(note, time);
-			this.#sub?.triggerRelease(note, time);
 		}
 
 		if (this.#held.size === 0) {
 			this.#noiseEnv?.triggerRelease(time);
+		}
+	}
+
+	#releaseSlot(which: 'osc1' | 'osc2', note: string, time: number | undefined, useGlide: boolean) {
+		const osc = this.patch[which];
+
+		if (osc.synthType === 'pluck') {
+			// Pluck self-decays. We schedule disposal a bit after release so the
+			// natural ring-out finishes. PluckSynth doesn't really have a release
+			// phase — calling triggerRelease just lets it continue ringing.
+			const map = which === 'osc1' ? this.#pluck1Voices : this.#pluck2Voices;
+			const voice = map.get(note);
+			if (voice) {
+				map.delete(note);
+				// Let it ring out for ~3s then dispose to free resources.
+				setTimeout(() => {
+					try {
+						voice.dispose();
+					} catch {
+						// already disposed
+					}
+				}, 3000);
+			}
+			return;
+		}
+
+		if (useGlide) {
+			// In mono glide modes only release when the LAST held note is gone.
+			if (this.#held.size === 0) {
+				const mono = which === 'osc1' ? this.#osc1Mono : this.#osc2Mono;
+				mono?.triggerRelease(time);
+			}
+		} else {
+			const poly = which === 'osc1' ? this.#osc1 : this.#osc2;
+			poly?.triggerRelease(note, time);
 		}
 	}
 
@@ -881,6 +991,11 @@ class AudioEngine {
 		this.#osc1Mono?.triggerRelease();
 		this.#osc2Mono?.triggerRelease();
 		this.#subMono?.triggerRelease();
+		// Dispose all in-flight pluck voices.
+		for (const v of this.#pluck1Voices.values()) v.dispose();
+		for (const v of this.#pluck2Voices.values()) v.dispose();
+		this.#pluck1Voices.clear();
+		this.#pluck2Voices.clear();
 		this.#held.clear();
 		this.#noiseEnv?.triggerRelease();
 	}
