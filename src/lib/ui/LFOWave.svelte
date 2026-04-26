@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { audio } from '$lib/audio/engine.svelte';
+	import type { LFO } from '$lib/audio/patch';
 
-	const lfo = $derived(audio.patch.lfo);
+	type Props = { which?: 'lfo1' | 'lfo2' };
+	let { which = 'lfo1' }: Props = $props();
+
+	const lfo: LFO = $derived(audio.patch[which]);
 
 	// Visualize a few cycles of a sine wave; depth scales the amplitude.
 	const W = 160;
@@ -27,7 +31,7 @@
 	const path = $derived.by(() => {
 		const N = 240;
 		const pts: string[] = [];
-		const amp = lfo.enabled ? Math.min(1, lfo.depth / 3000) : 0.05;
+		const amp = lfo.enabled && lfo.routes.length > 0 ? 0.85 : 0.15;
 		for (let i = 0; i < N; i++) {
 			const t = i / (N - 1);
 			const x = t * W;

@@ -206,13 +206,14 @@ class SessionClient {
 		} else if (msg.type === 'patch') {
 			audio.loadPatch(msg.patch, 'remote');
 		} else if (msg.type === 'section') {
-			const section = msg.section as 'osc1' | 'osc2' | 'env' | 'filter' | 'lfo';
+			const section = msg.section as 'osc1' | 'osc2' | 'env' | 'filter' | 'lfo1' | 'lfo2';
 			const value = msg.value as Record<string, unknown>;
 			if (section === 'osc1') audio.setOsc1(value, 'remote');
 			else if (section === 'osc2') audio.setOsc2(value, 'remote');
 			else if (section === 'env') audio.setEnvelope(value, 'remote');
 			else if (section === 'filter') audio.setFilter(value, 'remote');
-			else if (section === 'lfo') audio.setLFO(value, 'remote');
+			else if (section === 'lfo1') audio.setLFO1(value, 'remote');
+			else if (section === 'lfo2') audio.setLFO2(value, 'remote');
 		} else if (msg.type === 'presence') {
 			if (typeof msg.count === 'number') this.peers = msg.count;
 		} else if (msg.type === 'broadcastState') {

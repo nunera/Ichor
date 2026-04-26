@@ -65,11 +65,31 @@ export const FilterSchema = z.object({
 });
 export type Filter = z.infer<typeof FilterSchema>;
 
+/**
+ * A single mod-matrix routing: this LFO modulates `target` (a stable param
+ * id like 'filter.cutoff' or 'osc1.fine'). `amount` is the swing applied to
+ * the modulated parameter in its own units (e.g. ±Hz for cutoff, ±dB for
+ * level, ±cents for fine). `offset` is a constant bias added on top of the
+ * user-set base value.
+ */
+export const ModRouteSchema = z.object({
+	target: z.string().min(1),
+	amount: z.number().default(0),
+	offset: z.number().default(0)
+});
+export type ModRoute = z.infer<typeof ModRouteSchema>;
+
 export const LFOSchema = z.object({
 	rate: z.number().min(0.01).max(40),
-	depth: z.number().min(0).max(10000),
+	/**
+	 * Legacy depth field. Preserved for round-tripping older patches via the
+	 * preprocessor that builds a default `filter.cutoff` route from it. The
+	 * engine itself does not read this — routes are the source of truth.
+	 */
+	depth: z.number().min(0).max(10000).default(0),
 	enabled: z.boolean(),
-	shape: z.enum(['sine', 'square', 'triangle', 'sawtooth']).default('sine')
+	shape: z.enum(['sine', 'square', 'triangle', 'sawtooth']).default('sine'),
+	routes: z.array(ModRouteSchema).default([])
 });
 export type LFO = z.infer<typeof LFOSchema>;
 
@@ -182,12 +202,37 @@ export const EffectsSchema = z.object({
 });
 export type EffectsPatch = z.infer<typeof EffectsSchema>;
 
-export const PatchSchema = z.object({
+/**
+ * Legacy migration: older patches stored a single `lfo` with hardcoded
+ * cutoff routing via `depth`. Promote `lfo` → `lfo1` with a route to
+ * `filter.cutoff` derived from old depth; stub a disabled `lfo2`. New
+ * patches that already have `lfo1`/`lfo2` pass through.
+ */
+function migrateLegacyLfo(raw: unknown): unknown {
+	if (!raw || typeof raw !== 'object') return raw;
+	const r = raw as Record<string, unknown>;
+	if (!('lfo' in r) || 'lfo1' in r) return r;
+	const old = (r.lfo ?? {}) as Record<string, unknown>;
+	const depth = typeof old.depth === 'number' ? old.depth : 0;
+	const existingRoutes = Array.isArray(old.routes) ? (old.routes as unknown[]) : [];
+	const routes =
+		existingRoutes.length > 0
+			? existingRoutes
+			: [{ target: 'filter.cutoff', amount: depth, offset: 0 }];
+	const lfo1 = { ...old, routes };
+	const lfo2 = { rate: 4, depth: 0, enabled: false, shape: 'sine', routes: [] };
+	const { lfo: _drop, ...rest } = r;
+	void _drop;
+	return { ...rest, lfo1, lfo2 };
+}
+
+const PatchObject = z.object({
 	osc1: OscPatchSchema,
 	osc2: OscPatchSchema,
 	env: EnvelopeSchema,
 	filter: FilterSchema,
-	lfo: LFOSchema,
+	lfo1: LFOSchema,
+	lfo2: LFOSchema,
 	sub: SubOscSchema.default({ level: -6, octave: -1, enabled: false, type: 'sine', pan: 0 }),
 	noise: NoiseSchema.default({ enabled: false, type: 'white', level: -12, pan: 0 }),
 	voicing: VoicingSchema.default({ mode: 'poly', glide: 0.08 }),
@@ -199,10 +244,30 @@ export const PatchSchema = z.object({
 		reverb: { enabled: false, decay: 2.5, preDelay: 0.01, mix: 0.3 }
 	})
 });
-export type Patch = z.infer<typeof PatchSchema>;
 
-/** Input type — new fields with defaults are optional. Use for presets / inbound JSON. */
-export type PatchInput = z.input<typeof PatchSchema>;
+export const PatchSchema = z.preprocess(migrateLegacyLfo, PatchObject);
+export type Patch = z.infer<typeof PatchObject>;
+
+/**
+ * Input type — new fields with defaults are optional. Use for presets /
+ * inbound JSON. Includes the legacy `lfo` field as an optional alternative
+ * to `lfo1`/`lfo2` so 300+ existing presets typecheck unchanged; the
+ * preprocessor migrates them at parse time.
+ */
+type PatchObjectInput = z.input<typeof PatchObject>;
+export type PatchInput =
+	| PatchObjectInput
+	| (Omit<PatchObjectInput, 'lfo1' | 'lfo2'> & {
+			lfo?: {
+				rate?: number;
+				depth?: number;
+				enabled?: boolean;
+				shape?: string;
+				routes?: unknown[];
+			};
+			lfo1?: undefined;
+			lfo2?: undefined;
+	  });
 
 export const defaultPatch: Patch = {
 	osc1: {
@@ -241,7 +306,14 @@ export const defaultPatch: Patch = {
 	},
 	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
 	filter: { cutoff: 4000, resonance: 2, type: 'lowpass' },
-	lfo: { rate: 4, depth: 1500, enabled: false, shape: 'sine' },
+	lfo1: {
+		rate: 4,
+		depth: 1500,
+		enabled: false,
+		shape: 'sine',
+		routes: [{ target: 'filter.cutoff', amount: 1500, offset: 0 }]
+	},
+	lfo2: { rate: 2, depth: 0, enabled: false, shape: 'triangle', routes: [] },
 	sub: { level: -6, octave: -1, enabled: false, type: 'sine', pan: 0 },
 	noise: { enabled: false, type: 'white', level: -12, pan: 0 },
 	voicing: { mode: 'poly', glide: 0.08 },
@@ -267,7 +339,8 @@ export const SectionPartials = {
 	osc2: OscPatchSchema.partial(),
 	env: EnvelopeSchema.partial(),
 	filter: FilterSchema.partial(),
-	lfo: LFOSchema.partial(),
+	lfo1: LFOSchema.partial(),
+	lfo2: LFOSchema.partial(),
 	sub: SubOscSchema.partial(),
 	noise: NoiseSchema.partial(),
 	voicing: VoicingSchema.partial(),

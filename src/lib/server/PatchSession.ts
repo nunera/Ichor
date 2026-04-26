@@ -81,7 +81,7 @@ export class PatchSession extends DurableObject<Env> {
 				this.#fanout({ type: 'patch', patch: next }, ws);
 			} else if (m.type === 'section') {
 				const { section, value } = m as { section: string; value: unknown };
-				if (!['osc1', 'osc2', 'env', 'filter', 'lfo'].includes(section)) return;
+				if (!['osc1', 'osc2', 'env', 'filter', 'lfo1', 'lfo2'].includes(section)) return;
 				const current = await this.#getPatch();
 				const merged: Patch = {
 					...current,

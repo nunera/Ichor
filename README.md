@@ -1,6 +1,6 @@
 # ichor
 
-> A web-based synthesizer that grows with you.
+> A collaborative, hackable, browser-native synthesizer that grows with you.
 
 **ichor** is a browser-native music workstation built in Svelte 5 + SvelteKit. It starts as a one-finger piano and unfolds, layer by layer, into a sampler, groovebox, sound designer, effects rack, generative explorer, and collaborative DAW. Nothing to install. Bring headphones.
 

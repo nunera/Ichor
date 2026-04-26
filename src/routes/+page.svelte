@@ -16,6 +16,8 @@
 	import MIDIIndicator from '$lib/ui/MIDIIndicator.svelte';
 	import Guide from '$lib/ui/Guide.svelte';
 	import CursorLayer from '$lib/ui/CursorLayer.svelte';
+	import Cable from '$lib/ui/Cable.svelte';
+	import { dragMod } from '$lib/ui/dragMod.svelte';
 
 	let volume = $state(-12);
 	let vizMode = $state<'scope' | 'spectrum'>('scope');
@@ -29,6 +31,10 @@
 <StrudelDrawer />
 <EffectsDrawer />
 <CursorLayer />
+
+{#if dragMod.source}
+	<Cable anchor={dragMod.source.anchor} cursor={dragMod.cursor} hot={!!dragMod.hoveredTarget} />
+{/if}
 
 <main class="flex h-screen flex-col gap-3 overflow-hidden">
 	<!--

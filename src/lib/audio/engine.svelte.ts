@@ -8,6 +8,7 @@ import {
 	type Envelope,
 	type Filter,
 	type LFO,
+	type ModRoute,
 	type SubOsc,
 	type NoisePatch,
 	type Voicing,
@@ -17,6 +18,7 @@ import {
 	type ChorusPatch,
 	type BitcrusherPatch
 } from './patch';
+import { modTargets, liveMod, type ModTarget } from './modTargets';
 
 export type {
 	Patch,
@@ -44,7 +46,7 @@ export type WriteEvent =
 	| { source: WriteSource; section: 'osc1' | 'osc2'; value: Partial<OscPatch> }
 	| { source: WriteSource; section: 'env'; value: Partial<Envelope> }
 	| { source: WriteSource; section: 'filter'; value: Partial<Filter> }
-	| { source: WriteSource; section: 'lfo'; value: Partial<LFO> }
+	| { source: WriteSource; section: 'lfo1' | 'lfo2'; value: Partial<LFO> }
 	| { source: WriteSource; section: 'sub'; value: Partial<SubOsc> }
 	| { source: WriteSource; section: 'noise'; value: Partial<NoisePatch> }
 	| { source: WriteSource; section: 'voicing'; value: Partial<Voicing> }
@@ -86,7 +88,9 @@ class AudioEngine {
 	#noiseEnv: Tone.AmplitudeEnvelope | null = null;
 	#filter: Tone.Filter | null = null;
 	#cutoffSignal: Tone.Signal<'frequency'> | null = null;
-	#lfo: Tone.LFO | null = null;
+	#lfo1: Tone.LFO | null = null;
+	#lfo2: Tone.LFO | null = null;
+	#modRaf: number | null = null;
 	#analyser: Tone.Analyser | null = null;
 	#fft: Tone.Analyser | null = null;
 	// Effects chain order: filter → distortion → bit-drive → bit-crusher → bit-tone → chorus → delay → reverb → out.
@@ -228,15 +232,28 @@ class AudioEngine {
 		this.#osc2Mono?.connect(this.#osc2Gain);
 		this.#subMono = new Tone.Synth().connect(this.#subGain);
 
-		const d = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
-		this.#lfo = new Tone.LFO({
-			type: this.patch.lfo.shape as Tone.ToneOscillatorType,
-			frequency: this.patch.lfo.rate,
-			min: -d,
-			max: d
-		});
-		this.#lfo.connect(this.#filter.frequency);
-		this.#lfo.start();
+		// Two free-running LFOs. Output is normalized to [-1, 1]; the modulation
+		// tick reads `.value` each frame and scales by per-route amount before
+		// applying. We don't connect the LFOs to any audio node directly anymore
+		// — routing is fully software so we can target any param uniformly.
+		this.#lfo1 = new Tone.LFO({
+			type: this.patch.lfo1.shape as Tone.ToneOscillatorType,
+			frequency: this.patch.lfo1.rate,
+			min: -1,
+			max: 1
+		}).start();
+		this.#lfo2 = new Tone.LFO({
+			type: this.patch.lfo2.shape as Tone.ToneOscillatorType,
+			frequency: this.patch.lfo2.rate,
+			min: -1,
+			max: 1
+		}).start();
+
+		// Register modulatable targets now that all audio nodes exist.
+		this.#registerModTargets();
+		// Start the modulation rAF loop. Cheap: a few field reads + setter
+		// calls per route per frame.
+		this.#startModLoop();
 
 		this.#applyOscSettings();
 		this.#applyEnvelope();
@@ -282,13 +299,7 @@ class AudioEngine {
 	 */
 	setModulation(amount: number) {
 		this.#modulation = Math.max(0, Math.min(1, amount));
-		if (!this.#lfo) return;
-		// Effective depth = patch depth (when LFO enabled) + mod wheel * extra
-		const base = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
-		const wheel = this.#modulation * 4000; // up to 4kHz of cutoff sweep at full mod
-		const d = base + wheel;
-		this.#lfo.min = -d;
-		this.#lfo.max = d;
+		// Mod wheel scaling is read live by the mod tick — nothing else to do.
 	}
 
 	/**
@@ -600,16 +611,13 @@ class AudioEngine {
 		if (p.resonance !== undefined) this.#filter?.Q.rampTo(p.resonance, 0.02);
 	}
 
-	#applyLFO(p: Partial<LFO>) {
-		if (!this.#lfo) return;
-		if (p.shape !== undefined) this.#lfo.type = p.shape as Tone.ToneOscillatorType;
-		if (p.rate !== undefined) this.#lfo.frequency.rampTo(p.rate, 0.02);
-		if (p.depth !== undefined || p.enabled !== undefined) {
-			const base = this.patch.lfo.enabled ? this.patch.lfo.depth : 0;
-			const d = base + this.#modulation * 4000;
-			this.#lfo.min = -d;
-			this.#lfo.max = d;
-		}
+	#applyLFOOne(which: 'lfo1' | 'lfo2', p: Partial<LFO>) {
+		const node = which === 'lfo1' ? this.#lfo1 : this.#lfo2;
+		if (!node) return;
+		if (p.shape !== undefined) node.type = p.shape as Tone.ToneOscillatorType;
+		if (p.rate !== undefined) node.frequency.rampTo(p.rate, 0.02);
+		// `enabled` is read by the mod tick — no Tone-side change needed.
+		// `routes` are also pure data; the tick re-reads patch state each frame.
 	}
 
 	/* ----------------------- Public, validated setters ---------------------- */
@@ -642,11 +650,72 @@ class AudioEngine {
 		this.#emit({ source, section: 'filter', value: v });
 	}
 
+	setLFO1(p: Partial<LFO>, source: WriteSource = 'ui') {
+		const v = validateSection('lfo1', p);
+		Object.assign(this.patch.lfo1, v);
+		this.#applyLFOOne('lfo1', v);
+		this.#emit({ source, section: 'lfo1', value: v });
+	}
+
+	setLFO2(p: Partial<LFO>, source: WriteSource = 'ui') {
+		const v = validateSection('lfo2', p);
+		Object.assign(this.patch.lfo2, v);
+		this.#applyLFOOne('lfo2', v);
+		this.#emit({ source, section: 'lfo2', value: v });
+	}
+
+	/** Backwards-compat shim: legacy callers (Strudel ctrls, network msgs)
+	 *  that still address the old single 'lfo' route to lfo1. */
 	setLFO(p: Partial<LFO>, source: WriteSource = 'ui') {
-		const v = validateSection('lfo', p);
-		Object.assign(this.patch.lfo, v);
-		this.#applyLFO(v);
-		this.#emit({ source, section: 'lfo', value: v });
+		this.setLFO1(p, source);
+	}
+
+	/* ---- Mod-route mutation ------------------------------------------------ */
+
+	addRoute(which: 'lfo1' | 'lfo2', target: string, source: WriteSource = 'ui') {
+		const lfo = this.patch[which];
+		// If already routed to this target, do nothing.
+		if (lfo.routes.some((r) => r.target === target)) return;
+		const t = modTargets.get(target);
+		if (!t) return;
+		// Default amount = 25% of target's range, offset = 0. Sensible starting
+		// point so the user immediately hears something.
+		const range = t.max - t.min;
+		const amount = range * 0.25;
+		const next = [...lfo.routes, { target, amount, offset: 0 }];
+		this.setLFO1Routes(which, next, source);
+	}
+
+	updateRoute(
+		which: 'lfo1' | 'lfo2',
+		target: string,
+		patch: Partial<ModRoute>,
+		source: WriteSource = 'ui'
+	) {
+		const lfo = this.patch[which];
+		const next = lfo.routes.map((r) => (r.target === target ? { ...r, ...patch } : r));
+		this.setLFO1Routes(which, next, source);
+	}
+
+	removeRoute(which: 'lfo1' | 'lfo2', target: string, source: WriteSource = 'ui') {
+		const lfo = this.patch[which];
+		const next = lfo.routes.filter((r) => r.target !== target);
+		this.setLFO1Routes(which, next, source);
+		// If no LFO is still routed to this target, snap the audio param back
+		// to the user's base value so it doesn't get stuck at the last modulated
+		// reading.
+		const stillRouted =
+			this.patch.lfo1.routes.some((r) => r.target === target) ||
+			this.patch.lfo2.routes.some((r) => r.target === target);
+		if (!stillRouted) {
+			const t = modTargets.get(target);
+			if (t) t.apply(t.getBase());
+		}
+	}
+
+	private setLFO1Routes(which: 'lfo1' | 'lfo2', routes: ModRoute[], source: WriteSource) {
+		this.patch[which].routes = routes;
+		this.#emit({ source, section: which, value: { routes } });
 	}
 
 	setSub(p: Partial<SubOsc>, source: WriteSource = 'ui') {
@@ -783,7 +852,8 @@ class AudioEngine {
 		this.patch.osc2 = { ...next.osc2 };
 		this.patch.env = { ...next.env };
 		this.patch.filter = { ...next.filter };
-		this.patch.lfo = { ...next.lfo };
+		this.patch.lfo1 = { ...next.lfo1, routes: [...next.lfo1.routes] };
+		this.patch.lfo2 = { ...next.lfo2, routes: [...next.lfo2.routes] };
 		this.patch.sub = { ...next.sub };
 		this.patch.noise = { ...next.noise };
 		this.patch.voicing = { ...next.voicing };
@@ -797,7 +867,8 @@ class AudioEngine {
 		this.#applyOscSettings();
 		this.#applyEnvelope();
 		this.#applyFilter(this.patch.filter);
-		this.#applyLFO(this.patch.lfo);
+		this.#applyLFOOne('lfo1', this.patch.lfo1);
+		this.#applyLFOOne('lfo2', this.patch.lfo2);
 		this.#applySub(this.patch.sub);
 		this.#applyNoise(this.patch.noise);
 		this.#applyVoicing(this.patch.voicing);
@@ -998,6 +1069,311 @@ class AudioEngine {
 		this.#pluck2Voices.clear();
 		this.#held.clear();
 		this.#noiseEnv?.triggerRelease();
+	}
+
+	/* ----------------------------------------------------------------------- */
+	/* Mod-matrix: target registration + per-frame tick                        */
+	/* ----------------------------------------------------------------------- */
+
+	#registerModTargets() {
+		const setOsc = (which: 'osc1' | 'osc2', field: 'fine' | 'level' | 'pan' | 'width') => {
+			const schemaRanges: Record<string, [number, number]> = {
+				fine: [-50, 50],
+				level: [-60, 12],
+				pan: [-1, 1],
+				width: [0, 1]
+			};
+			const [min, max] = schemaRanges[field];
+			modTargets.register({
+				id: `${which}.${field}`,
+				label: field,
+				group: which,
+				min,
+				max,
+				getBase: () => (this.patch[which] as unknown as Record<string, number>)[field],
+				apply: (v) => {
+					if (field === 'fine') {
+						const osc = this.patch[which];
+						const detune = osc.octave * 1200 + osc.semi * 100 + v + this.#bendCents;
+						const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+						const mono = which === 'osc1' ? this.#osc1Mono : this.#osc2Mono;
+						synth?.set({ detune });
+						if (mono?.detune) mono.detune.value = detune;
+					} else if (field === 'level') {
+						const osc = this.patch[which];
+						const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
+						const t = osc.enabled ? Tone.dbToGain(v) : 0;
+						gain?.gain.rampTo(t, 0.01);
+					} else if (field === 'pan') {
+						// osc panning isn't currently in the patch type; no-op for now.
+					} else if (field === 'width') {
+						const osc = this.patch[which];
+						if (osc.type === 'pulse') {
+							const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+							synth?.set({ oscillator: { type: 'pulse', width: v } } as any);
+						}
+					}
+				}
+			});
+		};
+
+		setOsc('osc1', 'fine');
+		setOsc('osc1', 'level');
+		setOsc('osc1', 'width');
+		setOsc('osc2', 'fine');
+		setOsc('osc2', 'level');
+		setOsc('osc2', 'width');
+
+		modTargets.register({
+			id: 'filter.cutoff',
+			label: 'cutoff',
+			group: 'filter',
+			min: 20,
+			max: 20000,
+			getBase: () => this.patch.filter.cutoff,
+			apply: (v) => this.#cutoffSignal?.rampTo(v, 0.01)
+		});
+		modTargets.register({
+			id: 'filter.resonance',
+			label: 'reso',
+			group: 'filter',
+			min: 0.1,
+			max: 20,
+			getBase: () => this.patch.filter.resonance,
+			apply: (v) => this.#filter?.Q.rampTo(v, 0.01)
+		});
+
+		modTargets.register({
+			id: 'sub.level',
+			label: 'level',
+			group: 'sub',
+			min: -60,
+			max: 0,
+			getBase: () => this.patch.sub.level,
+			apply: (v) => {
+				const t = this.patch.sub.enabled ? Tone.dbToGain(v) : 0;
+				this.#subGain?.gain.rampTo(t, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'sub.pan',
+			label: 'pan',
+			group: 'sub',
+			min: -1,
+			max: 1,
+			getBase: () => this.patch.sub.pan,
+			apply: (v) => this.#subPan?.pan.rampTo(v, 0.01)
+		});
+
+		modTargets.register({
+			id: 'noise.level',
+			label: 'level',
+			group: 'noise',
+			min: -60,
+			max: 0,
+			getBase: () => this.patch.noise.level,
+			apply: (v) => {
+				const t = this.patch.noise.enabled ? Tone.dbToGain(v) : 0;
+				this.#noiseGain?.gain.rampTo(t, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'noise.pan',
+			label: 'pan',
+			group: 'noise',
+			min: -1,
+			max: 1,
+			getBase: () => this.patch.noise.pan,
+			apply: (v) => this.#noisePan?.pan.rampTo(v, 0.01)
+		});
+
+		// Effects (continuous params only; skip booleans + bit count int).
+		modTargets.register({
+			id: 'distortion.drive',
+			label: 'drive',
+			group: 'distortion',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.distortion.drive,
+			apply: (v) => {
+				if (this.#fxDistortion) this.#fxDistortion.distortion = v;
+			}
+		});
+		modTargets.register({
+			id: 'distortion.mix',
+			label: 'mix',
+			group: 'distortion',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.distortion.mix,
+			apply: (v) => {
+				if (this.patch.effects.distortion.enabled) this.#fxDistortion?.wet.rampTo(v, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'bitcrusher.tone',
+			label: 'tone',
+			group: 'bitcrusher',
+			min: 200,
+			max: 20000,
+			getBase: () => this.patch.effects.bitcrusher.tone,
+			apply: (v) => this.#fxBitTone?.frequency.rampTo(v, 0.01)
+		});
+		modTargets.register({
+			id: 'bitcrusher.mix',
+			label: 'mix',
+			group: 'bitcrusher',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.bitcrusher.mix,
+			apply: (v) => {
+				if (this.patch.effects.bitcrusher.enabled) this.#fxBitCrusher?.wet.rampTo(v, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'chorus.rate',
+			label: 'rate',
+			group: 'chorus',
+			min: 0.01,
+			max: 10,
+			getBase: () => this.patch.effects.chorus.rate,
+			apply: (v) => this.#fxChorus?.frequency.rampTo(v, 0.01)
+		});
+		modTargets.register({
+			id: 'chorus.depth',
+			label: 'depth',
+			group: 'chorus',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.chorus.depth,
+			apply: (v) => {
+				if (this.#fxChorus) this.#fxChorus.depth = v;
+			}
+		});
+		modTargets.register({
+			id: 'chorus.mix',
+			label: 'mix',
+			group: 'chorus',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.chorus.mix,
+			apply: (v) => {
+				if (this.patch.effects.chorus.enabled) this.#fxChorus?.wet.rampTo(v, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'delay.time',
+			label: 'time',
+			group: 'delay',
+			min: 0.001,
+			max: 2,
+			getBase: () => this.patch.effects.delay.time,
+			apply: (v) => this.#fxDelay?.delayTime.rampTo(v, 0.01)
+		});
+		modTargets.register({
+			id: 'delay.feedback',
+			label: 'fb',
+			group: 'delay',
+			min: 0,
+			max: 0.95,
+			getBase: () => this.patch.effects.delay.feedback,
+			apply: (v) => this.#fxDelay?.feedback.rampTo(v, 0.01)
+		});
+		modTargets.register({
+			id: 'delay.mix',
+			label: 'mix',
+			group: 'delay',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.delay.mix,
+			apply: (v) => {
+				if (this.patch.effects.delay.enabled) this.#fxDelay?.wet.rampTo(v, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'reverb.preDelay',
+			label: 'pre',
+			group: 'reverb',
+			min: 0,
+			max: 0.5,
+			getBase: () => this.patch.effects.reverb.preDelay,
+			apply: (v) => {
+				if (this.#fxReverb) this.#fxReverb.preDelay = v;
+			}
+		});
+		modTargets.register({
+			id: 'reverb.mix',
+			label: 'mix',
+			group: 'reverb',
+			min: 0,
+			max: 1,
+			getBase: () => this.patch.effects.reverb.mix,
+			apply: (v) => {
+				if (this.patch.effects.reverb.enabled) this.#fxReverb?.wet.rampTo(v, 0.01);
+			}
+		});
+	}
+
+	#startModLoop() {
+		if (this.#modRaf !== null) return;
+		const tick = () => {
+			this.#modTick();
+			this.#modRaf = requestAnimationFrame(tick);
+		};
+		this.#modRaf = requestAnimationFrame(tick);
+	}
+
+	/**
+	 * Per-frame: read each LFO's current value, accumulate contributions to
+	 * each routed target, then write `base + offset + sum(lfo*amount)` to the
+	 * audio graph and into `liveMod` for UI visualization. Targets with no
+	 * routes are not touched (their base value already applied via setters).
+	 */
+	#modTick() {
+		const l1 = this.#lfo1;
+		const l2 = this.#lfo2;
+		// Tone.LFO exposes .value as a getter returning the current output value
+		// in its [min,max] range — here normalized to [-1,1] because we set
+		// min=-1, max=1 at construction.
+		// Tone.LFO has a `.value` getter at runtime but it's not in the public
+		// type definitions, hence the cast.
+		const readLfo = (l: Tone.LFO | null, enabled: boolean): number => {
+			if (!l || !enabled) return 0;
+			const v = (l as unknown as { value: unknown }).value;
+			return typeof v === 'number' ? v : 0;
+		};
+		const v1 = readLfo(l1, this.patch.lfo1.enabled);
+		const v2 = readLfo(l2, this.patch.lfo2.enabled);
+
+		// Mod wheel boost: scales every active route by 1 + mod*1.0 (so at full
+		// wheel routings sound twice as wide, doubling their swing).
+		const wheelBoost = 1 + this.#modulation;
+
+		const contributions = new Map<string, { amount: number; offset: number }>();
+		const accumulate = (routes: ModRoute[], lfoVal: number, enabled: boolean) => {
+			if (!enabled) return;
+			for (const r of routes) {
+				const existing = contributions.get(r.target);
+				const add = r.amount * lfoVal * wheelBoost;
+				if (existing) {
+					existing.amount += add;
+					existing.offset += r.offset;
+				} else {
+					contributions.set(r.target, { amount: add, offset: r.offset });
+				}
+			}
+		};
+		accumulate(this.patch.lfo1.routes, v1, this.patch.lfo1.enabled);
+		accumulate(this.patch.lfo2.routes, v2, this.patch.lfo2.enabled);
+
+		for (const [id, c] of contributions) {
+			const t = modTargets.get(id);
+			if (!t) continue;
+			const base = t.getBase();
+			const eff = Math.max(t.min, Math.min(t.max, base + c.offset + c.amount));
+			t.apply(eff);
+			liveMod.set(id, eff);
+		}
 	}
 }
 

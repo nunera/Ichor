@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { audio } from '$lib/audio/engine.svelte';
+	import { liveMod } from '$lib/audio/modTargets';
+	import { dragMod } from './dragMod.svelte';
+
 	type Props = {
 		label: string;
 		value: number;
@@ -10,6 +14,13 @@
 		curve?: number; // exponent: 1 = linear, >1 = more resolution near min
 		format?: (v: number) => string;
 		onchange: (v: number) => void;
+		/**
+		 * Mod-matrix target id ('filter.cutoff', 'osc1.fine', etc). When set,
+		 * the knob acts as a drop zone for LFO drags, draws a colored ring
+		 * indicating modulation amount/offset, and shows a live indicator
+		 * tracking the LFO contribution.
+		 */
+		target?: string;
 	};
 
 	let {
@@ -22,8 +33,43 @@
 		size = 44,
 		curve = 1,
 		format,
-		onchange
+		onchange,
+		target
 	}: Props = $props();
+
+	let svgEl: SVGSVGElement | null = $state(null);
+
+	// Mod-routing introspection: which LFOs route to this target?
+	const routes = $derived.by(() => {
+		if (!target) return [] as Array<{ which: 'lfo1' | 'lfo2'; amount: number; offset: number }>;
+		const out: Array<{ which: 'lfo1' | 'lfo2'; amount: number; offset: number }> = [];
+		for (const w of ['lfo1', 'lfo2'] as const) {
+			const r = audio.patch[w].routes.find((r) => r.target === target);
+			if (r && audio.patch[w].enabled) out.push({ which: w, ...r });
+		}
+		return out;
+	});
+
+	// Sum of route amounts for the static "swing" arc visualization.
+	const totalAmount = $derived(routes.reduce((s, r) => s + Math.abs(r.amount), 0));
+	const totalOffset = $derived(routes.reduce((s, r) => s + r.offset, 0));
+
+	// Live modulated value (updated by engine rAF). Drives the moving dot.
+	let live = $state<number | null>(null);
+	$effect(() => {
+		if (!target) return;
+		const unsub = liveMod.subscribe(target, (v) => (live = v));
+		return unsub;
+	});
+
+	// Register as drop target: tracks own bounding rect.
+	$effect(() => {
+		if (!target || !svgEl) return;
+		return dragMod.registerTarget(target, () => svgEl?.getBoundingClientRect() ?? null);
+	});
+
+	const isDropHover = $derived(!!target && dragMod.hoveredTarget === target);
+	const isDragging = $derived(!!dragMod.source);
 
 	// Map value <-> 0..1 with optional exponential curve.
 	const norm = $derived(
@@ -59,6 +105,29 @@
 	const valuePath = $derived(
 		`M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${largeArcValue} 1 ${valueEnd.x} ${valueEnd.y}`
 	);
+
+	/* ---- Modulation ring (outer, at radius rRing) ---- */
+	const rRing = r + 4;
+	function valueToNorm(v: number): number {
+		const c = Math.max(min, Math.min(max, v));
+		const n = (c - min) / (max - min);
+		return curve === 1 ? n : n ** (1 / curve);
+	}
+	function valueToAngle(v: number): number {
+		return START + valueToNorm(v) * ARC;
+	}
+
+	const ringCenterAngle = $derived(valueToAngle(value + totalOffset));
+	const ringMinAngle = $derived(valueToAngle(value + totalOffset - totalAmount));
+	const ringMaxAngle = $derived(valueToAngle(value + totalOffset + totalAmount));
+	const ringStart = $derived(polar(ringMinAngle, rRing));
+	const ringEnd = $derived(polar(ringMaxAngle, rRing));
+	const ringLargeArc = $derived(Math.abs(ringMaxAngle - ringMinAngle) > 180 ? 1 : 0);
+	const ringPath = $derived(
+		`M ${ringStart.x} ${ringStart.y} A ${rRing} ${rRing} 0 ${ringLargeArc} 1 ${ringEnd.x} ${ringEnd.y}`
+	);
+	const liveAngle = $derived(live === null ? ringCenterAngle : valueToAngle(live));
+	const liveDot = $derived(polar(liveAngle, rRing));
 
 	const display = $derived(format ? format(value) : value.toFixed(step >= 1 ? 0 : 2));
 
@@ -110,10 +179,12 @@
 
 <div class="flex min-w-0 flex-col items-center gap-0.5 select-none">
 	<svg
-		viewBox="0 0 {size} {size}"
-		width={size}
-		height={size}
-		class="cursor-ns-resize touch-none"
+		bind:this={svgEl}
+		viewBox="0 0 {size + 8} {size + 8}"
+		width={size + 8}
+		height={size + 8}
+		class="cursor-ns-resize touch-none transition-[filter] duration-150"
+		class:drop-shadow-[0_0_8px_var(--ctp-yellow)]={isDropHover}
 		role="slider"
 		tabindex="0"
 		aria-label={label}
@@ -127,29 +198,63 @@
 		ondblclick={onDblClick}
 		onwheel={onWheel}
 	>
-		<!-- background track -->
-		<path
-			d={trackPath}
-			class="stroke-surface1"
-			stroke-width="3"
-			fill="none"
-			stroke-linecap="round"
-		/>
-		<!-- value arc -->
-		<path d={valuePath} class="stroke-mauve" stroke-width="3" fill="none" stroke-linecap="round" />
-		<!-- knob body -->
-		<circle {cx} {cy} r={r * 0.7} class="fill-surface0 stroke-surface2" stroke-width="1" />
-		<!-- pointer line -->
-		<line
-			x1={indicatorInner.x}
-			y1={indicatorInner.y}
-			x2={indicatorOuter.x}
-			y2={indicatorOuter.y}
-			class="stroke-text"
-			stroke-width="2"
-			stroke-linecap="round"
-		/>
-	</svg>
+		<g transform="translate(4 4)">
+			{#if target && routes.length > 0}
+				<!-- modulation ring (outer) -->
+				<path
+					d={ringPath}
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					class="text-yellow opacity-60"
+				/>
+				<!-- live indicator dot -->
+				<circle cx={liveDot.x} cy={liveDot.y} r="2.5" class="fill-yellow" />
+			{/if}
+			{#if target && isDragging}
+				<!-- drop-target hint ring -->
+				<circle
+					{cx}
+					{cy}
+					r={rRing + 2}
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1"
+					stroke-dasharray="2 3"
+					class="text-yellow opacity-60"
+				/>
+			{/if}
+			<!-- background track -->
+			<path
+				d={trackPath}
+				class="stroke-surface1"
+				stroke-width="3"
+				fill="none"
+				stroke-linecap="round"
+			/>
+			<!-- value arc -->
+			<path
+				d={valuePath}
+				class="stroke-mauve"
+				stroke-width="3"
+				fill="none"
+				stroke-linecap="round"
+			/>
+			<!-- knob body -->
+			<circle {cx} {cy} r={r * 0.7} class="fill-surface0 stroke-surface2" stroke-width="1" />
+			<!-- pointer line -->
+			<line
+				x1={indicatorInner.x}
+				y1={indicatorInner.y}
+				x2={indicatorOuter.x}
+				y2={indicatorOuter.y}
+				class="stroke-text"
+				stroke-width="2"
+				stroke-linecap="round"
+			/>
+		</g></svg
+	>
 	<span class="text-[10px] tracking-wide text-subtext0 lowercase">{label}</span>
 	<span class="text-[10px] text-overlay1 tabular-nums">{display}{unit}</span>
 </div>
