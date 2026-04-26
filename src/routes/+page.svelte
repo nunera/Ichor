@@ -11,6 +11,7 @@
 	import SessionBadge from '$lib/ui/SessionBadge.svelte';
 	import BrowseSessions from '$lib/ui/BrowseSessions.svelte';
 	import StrudelDrawer from '$lib/ui/StrudelDrawer.svelte';
+	import EffectsDrawer from '$lib/ui/EffectsDrawer.svelte';
 	import MIDIIndicator from '$lib/ui/MIDIIndicator.svelte';
 	import CursorLayer from '$lib/ui/CursorLayer.svelte';
 
@@ -24,6 +25,7 @@
 
 <PatchEditor />
 <StrudelDrawer />
+<EffectsDrawer />
 <CursorLayer />
 
 <main class="flex h-screen flex-col gap-3 overflow-hidden">

@@ -90,6 +90,8 @@ class StrudelBridge {
 			core.registerControl('chorusMix');
 			core.registerControl('bitcrusherEnabled');
 			core.registerControl('bitcrusherBits');
+			core.registerControl('bitcrusherDrive');
+			core.registerControl('bitcrusherTone');
 			core.registerControl('bitcrusherMix');
 
 			let activePattern: any = null;
@@ -389,12 +391,16 @@ class StrudelBridge {
 						if (
 							v?.bitcrusherEnabled !== undefined ||
 							v?.bitcrusherBits !== undefined ||
+							v?.bitcrusherDrive !== undefined ||
+							v?.bitcrusherTone !== undefined ||
 							v?.bitcrusherMix !== undefined
 						) {
 							audio.setBitcrusher(
 								{
 									...(v.bitcrusherEnabled !== undefined && { enabled: !!v.bitcrusherEnabled }),
 									...(v.bitcrusherBits !== undefined && { bits: v.bitcrusherBits }),
+									...(v.bitcrusherDrive !== undefined && { drive: v.bitcrusherDrive }),
+									...(v.bitcrusherTone !== undefined && { tone: v.bitcrusherTone }),
 									...(v.bitcrusherMix !== undefined && { mix: v.bitcrusherMix })
 								},
 								'remote'

@@ -86,6 +86,85 @@ export const NoiseSchema = z.object({
 });
 export type NoisePatch = z.infer<typeof NoiseSchema>;
 
+/* ----- Effects ----------------------------------------------------------- */
+
+export const ReverbSchema = z.object({
+	enabled: z.boolean().default(false),
+	decay: z.number().min(0.1).max(20).default(2.5),
+	preDelay: z.number().min(0).max(0.5).default(0.01),
+	mix: z.number().min(0).max(1).default(0.3)
+});
+export type ReverbPatch = z.infer<typeof ReverbSchema>;
+
+export const DelaySchema = z.object({
+	enabled: z.boolean().default(false),
+	time: z.number().min(0.001).max(2).default(0.25),
+	feedback: z.number().min(0).max(0.95).default(0.4),
+	pingPong: z.boolean().default(true),
+	mix: z.number().min(0).max(1).default(0.25)
+});
+export type DelayPatch = z.infer<typeof DelaySchema>;
+
+export const DistortionSchema = z.object({
+	enabled: z.boolean().default(false),
+	drive: z.number().min(0).max(1).default(0.4),
+	mix: z.number().min(0).max(1).default(1)
+});
+export type DistortionPatch = z.infer<typeof DistortionSchema>;
+
+export const ChorusSchema = z.object({
+	enabled: z.boolean().default(false),
+	rate: z.number().min(0.01).max(10).default(1.5),
+	depth: z.number().min(0).max(1).default(0.5),
+	spread: z.number().min(0).max(180).default(90),
+	mix: z.number().min(0).max(1).default(0.5)
+});
+export type ChorusPatch = z.infer<typeof ChorusSchema>;
+
+export const BitcrusherSchema = z.object({
+	enabled: z.boolean().default(false),
+	/** Bit depth, 1-16. Lower = crunchier. */
+	bits: z.number().int().min(1).max(16).default(8),
+	/** Pre-gain into crusher to push it harder (0-2x). */
+	drive: z.number().min(0).max(2).default(1),
+	/** Post-crusher low-pass cutoff (Hz) to tame harshness/aliasing. */
+	tone: z.number().min(200).max(20000).default(20000),
+	mix: z.number().min(0).max(1).default(1)
+});
+export type BitcrusherPatch = z.infer<typeof BitcrusherSchema>;
+
+export const EffectsSchema = z.object({
+	distortion: DistortionSchema.default({ enabled: false, drive: 0.4, mix: 1 }),
+	bitcrusher: BitcrusherSchema.default({
+		enabled: false,
+		bits: 8,
+		drive: 1,
+		tone: 20000,
+		mix: 1
+	}),
+	chorus: ChorusSchema.default({
+		enabled: false,
+		rate: 1.5,
+		depth: 0.5,
+		spread: 90,
+		mix: 0.5
+	}),
+	delay: DelaySchema.default({
+		enabled: false,
+		time: 0.25,
+		feedback: 0.4,
+		pingPong: true,
+		mix: 0.25
+	}),
+	reverb: ReverbSchema.default({
+		enabled: false,
+		decay: 2.5,
+		preDelay: 0.01,
+		mix: 0.3
+	})
+});
+export type EffectsPatch = z.infer<typeof EffectsSchema>;
+
 export const PatchSchema = z.object({
 	osc1: OscPatchSchema,
 	osc2: OscPatchSchema,
@@ -94,7 +173,14 @@ export const PatchSchema = z.object({
 	lfo: LFOSchema,
 	sub: SubOscSchema.default({ level: -6, octave: -1, enabled: false, type: 'sine', pan: 0 }),
 	noise: NoiseSchema.default({ enabled: false, type: 'white', level: -12, pan: 0 }),
-	voicing: VoicingSchema.default({ mode: 'poly', glide: 0.08 })
+	voicing: VoicingSchema.default({ mode: 'poly', glide: 0.08 }),
+	effects: EffectsSchema.default({
+		distortion: { enabled: false, drive: 0.4, mix: 1 },
+		bitcrusher: { enabled: false, bits: 8, drive: 1, tone: 20000, mix: 1 },
+		chorus: { enabled: false, rate: 1.5, depth: 0.5, spread: 90, mix: 0.5 },
+		delay: { enabled: false, time: 0.25, feedback: 0.4, pingPong: true, mix: 0.25 },
+		reverb: { enabled: false, decay: 2.5, preDelay: 0.01, mix: 0.3 }
+	})
 });
 export type Patch = z.infer<typeof PatchSchema>;
 
@@ -129,7 +215,14 @@ export const defaultPatch: Patch = {
 	lfo: { rate: 4, depth: 1500, enabled: false, shape: 'sine' },
 	sub: { level: -6, octave: -1, enabled: false, type: 'sine', pan: 0 },
 	noise: { enabled: false, type: 'white', level: -12, pan: 0 },
-	voicing: { mode: 'poly', glide: 0.08 }
+	voicing: { mode: 'poly', glide: 0.08 },
+	effects: {
+		distortion: { enabled: false, drive: 0.4, mix: 1 },
+		bitcrusher: { enabled: false, bits: 8, drive: 1, tone: 20000, mix: 1 },
+		chorus: { enabled: false, rate: 1.5, depth: 0.5, spread: 90, mix: 0.5 },
+		delay: { enabled: false, time: 0.25, feedback: 0.4, pingPong: true, mix: 0.25 },
+		reverb: { enabled: false, decay: 2.5, preDelay: 0.01, mix: 0.3 }
+	}
 };
 
 /* ------------------------------------------------------------------------ */
@@ -148,7 +241,12 @@ export const SectionPartials = {
 	lfo: LFOSchema.partial(),
 	sub: SubOscSchema.partial(),
 	noise: NoiseSchema.partial(),
-	voicing: VoicingSchema.partial()
+	voicing: VoicingSchema.partial(),
+	reverb: ReverbSchema.partial(),
+	delay: DelaySchema.partial(),
+	distortion: DistortionSchema.partial(),
+	chorus: ChorusSchema.partial(),
+	bitcrusher: BitcrusherSchema.partial()
 } as const;
 
 export type Section = keyof typeof SectionPartials;

@@ -10,10 +10,27 @@ import {
 	type LFO,
 	type SubOsc,
 	type NoisePatch,
-	type Voicing
+	type Voicing,
+	type ReverbPatch,
+	type DelayPatch,
+	type DistortionPatch,
+	type ChorusPatch,
+	type BitcrusherPatch
 } from './patch';
 
-export type { Patch, OscPatch, Waveform, SubOsc, NoisePatch, Voicing } from './patch';
+export type {
+	Patch,
+	OscPatch,
+	Waveform,
+	SubOsc,
+	NoisePatch,
+	Voicing,
+	ReverbPatch,
+	DelayPatch,
+	DistortionPatch,
+	ChorusPatch,
+	BitcrusherPatch
+} from './patch';
 export { defaultPatch } from './patch';
 
 /**
@@ -31,6 +48,11 @@ export type WriteEvent =
 	| { source: WriteSource; section: 'sub'; value: Partial<SubOsc> }
 	| { source: WriteSource; section: 'noise'; value: Partial<NoisePatch> }
 	| { source: WriteSource; section: 'voicing'; value: Partial<Voicing> }
+	| { source: WriteSource; section: 'reverb'; value: Partial<ReverbPatch> }
+	| { source: WriteSource; section: 'delay'; value: Partial<DelayPatch> }
+	| { source: WriteSource; section: 'distortion'; value: Partial<DistortionPatch> }
+	| { source: WriteSource; section: 'chorus'; value: Partial<ChorusPatch> }
+	| { source: WriteSource; section: 'bitcrusher'; value: Partial<BitcrusherPatch> }
 	| { source: WriteSource; section: 'all'; value: Patch };
 
 class AudioEngine {
@@ -60,6 +82,15 @@ class AudioEngine {
 	#lfo: Tone.LFO | null = null;
 	#analyser: Tone.Analyser | null = null;
 	#fft: Tone.Analyser | null = null;
+	// Effects chain order: filter → distortion → bit-drive → bit-crusher → bit-tone → chorus → delay → reverb → out.
+	// Bitcrusher gets pre-drive (push it harder) and post tone (LP filter to tame harshness).
+	#fxDistortion: Tone.Distortion | null = null;
+	#fxBitDrive: Tone.Gain | null = null;
+	#fxBitCrusher: Tone.BitCrusher | null = null;
+	#fxBitTone: Tone.Filter | null = null;
+	#fxChorus: Tone.Chorus | null = null;
+	#fxDelay: Tone.PingPongDelay | null = null;
+	#fxReverb: Tone.Reverb | null = null;
 	#held = new Set<string>();
 	#lastNote: string | null = null;
 	/** Pitch bend in cents. Range: ±200 cents (= ±2 semitones). */
@@ -88,11 +119,60 @@ class AudioEngine {
 			frequency: this.patch.filter.cutoff,
 			Q: this.patch.filter.resonance,
 			rolloff: -24
-		}).toDestination();
+		});
+
+		// Build effects chain: distortion → bit-drive → bitcrusher → bit-tone → chorus → delay → reverb → out.
+		// Each effect uses its `wet` param as the active mix; `enabled=false` means wet→0 (bypass).
+		const fx = this.patch.effects;
+
+		this.#fxDistortion = new Tone.Distortion({
+			distortion: fx.distortion.drive,
+			oversample: '2x',
+			wet: fx.distortion.enabled ? fx.distortion.mix : 0
+		});
+		this.#fxBitDrive = new Tone.Gain(fx.bitcrusher.enabled ? fx.bitcrusher.drive : 1);
+		this.#fxBitCrusher = new Tone.BitCrusher({
+			bits: fx.bitcrusher.bits,
+			wet: fx.bitcrusher.enabled ? fx.bitcrusher.mix : 0
+		});
+		this.#fxBitTone = new Tone.Filter({
+			type: 'lowpass',
+			frequency: fx.bitcrusher.tone,
+			rolloff: -12
+		});
+		this.#fxChorus = new Tone.Chorus({
+			frequency: fx.chorus.rate,
+			depth: fx.chorus.depth,
+			spread: fx.chorus.spread,
+			wet: fx.chorus.enabled ? fx.chorus.mix : 0
+		}).start();
+		this.#fxDelay = new Tone.PingPongDelay({
+			delayTime: fx.delay.time,
+			feedback: fx.delay.feedback,
+			wet: fx.delay.enabled ? fx.delay.mix : 0
+		});
+		this.#fxReverb = new Tone.Reverb({
+			decay: fx.reverb.decay,
+			preDelay: fx.reverb.preDelay,
+			wet: fx.reverb.enabled ? fx.reverb.mix : 0
+		});
+		this.#fxReverb.generate(); // build IR
+
+		this.#filter.chain(
+			this.#fxDistortion,
+			this.#fxBitDrive,
+			this.#fxBitCrusher,
+			this.#fxBitTone,
+			this.#fxChorus,
+			this.#fxDelay,
+			this.#fxReverb,
+			Tone.getDestination()
+		);
 
 		this.#analyser = new Tone.Analyser('waveform', 1024);
 		this.#fft = new Tone.Analyser('fft', 1024);
-		this.#filter.fan(this.#analyser, this.#fft);
+		// Tap analyser at end of chain so the visualizer reflects effects.
+		this.#fxReverb.fan(this.#analyser, this.#fft);
 
 		this.#cutoffSignal = new Tone.Signal(this.patch.filter.cutoff, 'frequency');
 		this.#cutoffSignal.connect(this.#filter.frequency);
@@ -415,6 +495,92 @@ class AudioEngine {
 		this.#emit({ source, section: 'voicing', value: v });
 	}
 
+	/* ---- Effects ----------------------------------------------------------- */
+
+	#applyDistortion(p: Partial<DistortionPatch>) {
+		const d = this.patch.effects.distortion;
+		if (p.drive !== undefined && this.#fxDistortion) this.#fxDistortion.distortion = d.drive;
+		if (p.mix !== undefined || p.enabled !== undefined) {
+			this.#fxDistortion?.wet.rampTo(d.enabled ? d.mix : 0, 0.05);
+		}
+	}
+
+	#applyBitcrusher(p: Partial<BitcrusherPatch>) {
+		const b = this.patch.effects.bitcrusher;
+		if (p.bits !== undefined && this.#fxBitCrusher) this.#fxBitCrusher.bits.value = b.bits;
+		if (p.drive !== undefined) {
+			// drive only takes effect when enabled; otherwise gain stays at 1
+			this.#fxBitDrive?.gain.rampTo(b.enabled ? b.drive : 1, 0.05);
+		}
+		if (p.tone !== undefined) this.#fxBitTone?.frequency.rampTo(b.tone, 0.05);
+		if (p.mix !== undefined || p.enabled !== undefined) {
+			this.#fxBitCrusher?.wet.rampTo(b.enabled ? b.mix : 0, 0.05);
+			this.#fxBitDrive?.gain.rampTo(b.enabled ? b.drive : 1, 0.05);
+		}
+	}
+
+	#applyChorus(p: Partial<ChorusPatch>) {
+		const c = this.patch.effects.chorus;
+		if (p.rate !== undefined) this.#fxChorus?.frequency.rampTo(c.rate, 0.05);
+		if (p.depth !== undefined && this.#fxChorus) this.#fxChorus.depth = c.depth;
+		if (p.spread !== undefined && this.#fxChorus) this.#fxChorus.spread = c.spread;
+		if (p.mix !== undefined || p.enabled !== undefined) {
+			this.#fxChorus?.wet.rampTo(c.enabled ? c.mix : 0, 0.05);
+		}
+	}
+
+	#applyDelay(p: Partial<DelayPatch>) {
+		const d = this.patch.effects.delay;
+		if (p.time !== undefined) this.#fxDelay?.delayTime.rampTo(d.time, 0.05);
+		if (p.feedback !== undefined) this.#fxDelay?.feedback.rampTo(d.feedback, 0.05);
+		if (p.mix !== undefined || p.enabled !== undefined) {
+			this.#fxDelay?.wet.rampTo(d.enabled ? d.mix : 0, 0.05);
+		}
+	}
+
+	#applyReverb(p: Partial<ReverbPatch>) {
+		const r = this.patch.effects.reverb;
+		if (p.decay !== undefined && this.#fxReverb) {
+			this.#fxReverb.decay = r.decay;
+			this.#fxReverb.generate(); // re-render impulse
+		}
+		if (p.preDelay !== undefined && this.#fxReverb) this.#fxReverb.preDelay = r.preDelay;
+		if (p.mix !== undefined || p.enabled !== undefined) {
+			this.#fxReverb?.wet.rampTo(r.enabled ? r.mix : 0, 0.05);
+		}
+	}
+
+	setDistortion(p: Partial<DistortionPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('distortion', p);
+		Object.assign(this.patch.effects.distortion, v);
+		this.#applyDistortion(v);
+		this.#emit({ source, section: 'distortion', value: v });
+	}
+	setBitcrusher(p: Partial<BitcrusherPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('bitcrusher', p);
+		Object.assign(this.patch.effects.bitcrusher, v);
+		this.#applyBitcrusher(v);
+		this.#emit({ source, section: 'bitcrusher', value: v });
+	}
+	setChorus(p: Partial<ChorusPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('chorus', p);
+		Object.assign(this.patch.effects.chorus, v);
+		this.#applyChorus(v);
+		this.#emit({ source, section: 'chorus', value: v });
+	}
+	setDelay(p: Partial<DelayPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('delay', p);
+		Object.assign(this.patch.effects.delay, v);
+		this.#applyDelay(v);
+		this.#emit({ source, section: 'delay', value: v });
+	}
+	setReverb(p: Partial<ReverbPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('reverb', p);
+		Object.assign(this.patch.effects.reverb, v);
+		this.#applyReverb(v);
+		this.#emit({ source, section: 'reverb', value: v });
+	}
+
 	/**
 	 * Replace the entire patch atomically. Validates the full schema first;
 	 * applies every section to the audio graph; emits a single 'all' event.
@@ -429,6 +595,13 @@ class AudioEngine {
 		this.patch.sub = { ...next.sub };
 		this.patch.noise = { ...next.noise };
 		this.patch.voicing = { ...next.voicing };
+		this.patch.effects = {
+			distortion: { ...next.effects.distortion },
+			bitcrusher: { ...next.effects.bitcrusher },
+			chorus: { ...next.effects.chorus },
+			delay: { ...next.effects.delay },
+			reverb: { ...next.effects.reverb }
+		};
 		this.#applyOscSettings();
 		this.#applyEnvelope();
 		this.#applyFilter(this.patch.filter);
@@ -436,6 +609,11 @@ class AudioEngine {
 		this.#applySub(this.patch.sub);
 		this.#applyNoise(this.patch.noise);
 		this.#applyVoicing(this.patch.voicing);
+		this.#applyDistortion(this.patch.effects.distortion);
+		this.#applyBitcrusher(this.patch.effects.bitcrusher);
+		this.#applyChorus(this.patch.effects.chorus);
+		this.#applyDelay(this.patch.effects.delay);
+		this.#applyReverb(this.patch.effects.reverb);
 		this.#emit({ source, section: 'all', value: next });
 	}
 
