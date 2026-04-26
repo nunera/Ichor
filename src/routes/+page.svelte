@@ -48,14 +48,13 @@
 		<Visualizer mode={vizMode} ambient class="absolute inset-0 h-full w-full" />
 
 		<div class="relative flex items-end gap-4">
-			<div>
+			<div class="pb-4.5">
 				<h1
 					class="border border-mauve/60 bg-base px-3 py-1 text-2xl tracking-[0.15em] text-text"
 					style="font-family: 'Oxanium', sans-serif; font-weight: 300;"
 				>
 					ICHOR
 				</h1>
-				<p class="text-xs text-subtext0">layer 1 — sound design</p>
 			</div>
 
 			<button

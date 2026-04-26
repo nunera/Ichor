@@ -2,7 +2,7 @@
 
 > A collaborative, hackable, browser-native synthesizer that grows with you.
 
-**ichor** is a browser-native music workstation built in Svelte 5 + SvelteKit. It starts as a one-finger piano and unfolds, layer by layer, into a sampler, groovebox, sound designer, effects rack, generative explorer, and collaborative DAW. Nothing to install. Bring headphones.
+**ichor** is a browser-native synthesizer built in Svelte 5 + SvelteKit. Two oscillators with swappable engines (subtractive, FM, AM, Karplus-Strong), a multi-mode filter, draggable LFOs, an effects rack, an arpeggiator, live coding via Strudel, and real-time collaborative sessions over Cloudflare Durable Objects. Nothing to install. Bring headphones.
 
 ```
        .  .   . .
@@ -18,7 +18,7 @@
 
 ## Status
 
-**Layer 2 — sound design + effects + live coding.** A playable, hackable synth in the browser:
+A playable, hackable synth in the browser:
 
 ### Synthesis
 
