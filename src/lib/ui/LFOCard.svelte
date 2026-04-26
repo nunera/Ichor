@@ -135,30 +135,15 @@
 								amt
 								<input
 									type="range"
-									min={-range}
-									max={range}
-									step={range / 200}
-									value={r.amount}
-									oninput={(e) =>
-										audio.updateRoute(which, r.target, {
-											amount: e.currentTarget.valueAsNumber
-										})}
-									class="w-12 accent-yellow"
-								/>
-							</label>
-							<label class="flex items-center gap-1 text-[9px] text-overlay1">
-								off
-								<input
-									type="range"
-									min={-range / 2}
+									min="0"
 									max={range / 2}
-									step={range / 200}
-									value={r.offset}
+									step={range / 400}
+									value={Math.abs(r.amount)}
 									oninput={(e) =>
 										audio.updateRoute(which, r.target, {
-											offset: e.currentTarget.valueAsNumber
+											amount: e.currentTarget.valueAsNumber * Math.sign(r.amount || 1)
 										})}
-									class="w-10 accent-blue"
+									class="w-16 accent-yellow"
 								/>
 							</label>
 						</div>

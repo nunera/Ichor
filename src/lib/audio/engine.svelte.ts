@@ -88,9 +88,10 @@ class AudioEngine {
 	#noiseEnv: Tone.AmplitudeEnvelope | null = null;
 	#filter: Tone.Filter | null = null;
 	#cutoffSignal: Tone.Signal<'frequency'> | null = null;
-	#lfo1: Tone.LFO | null = null;
-	#lfo2: Tone.LFO | null = null;
+	#lfo1Phase = 0;
+	#lfo2Phase = 0;
 	#modRaf: number | null = null;
+	#lastModTime = 0;
 	#analyser: Tone.Analyser | null = null;
 	#fft: Tone.Analyser | null = null;
 	// Effects chain order: filter → distortion → bit-drive → bit-crusher → bit-tone → chorus → delay → reverb → out.
@@ -232,27 +233,10 @@ class AudioEngine {
 		this.#osc2Mono?.connect(this.#osc2Gain);
 		this.#subMono = new Tone.Synth().connect(this.#subGain);
 
-		// Two free-running LFOs. Output is normalized to [-1, 1]; the modulation
-		// tick reads `.value` each frame and scales by per-route amount before
-		// applying. We don't connect the LFOs to any audio node directly anymore
-		// — routing is fully software so we can target any param uniformly.
-		this.#lfo1 = new Tone.LFO({
-			type: this.patch.lfo1.shape as Tone.ToneOscillatorType,
-			frequency: this.patch.lfo1.rate,
-			min: -1,
-			max: 1
-		}).start();
-		this.#lfo2 = new Tone.LFO({
-			type: this.patch.lfo2.shape as Tone.ToneOscillatorType,
-			frequency: this.patch.lfo2.rate,
-			min: -1,
-			max: 1
-		}).start();
-
-		// Register modulatable targets now that all audio nodes exist.
+		// Start the modulation rAF loop. We track phase in software for LFOs
+		// because we route them to arbitrary targets, bypassing the audio graph.
 		this.#registerModTargets();
-		// Start the modulation rAF loop. Cheap: a few field reads + setter
-		// calls per route per frame.
+		this.#lastModTime = performance.now();
 		this.#startModLoop();
 
 		this.#applyOscSettings();
@@ -612,12 +596,7 @@ class AudioEngine {
 	}
 
 	#applyLFOOne(which: 'lfo1' | 'lfo2', p: Partial<LFO>) {
-		const node = which === 'lfo1' ? this.#lfo1 : this.#lfo2;
-		if (!node) return;
-		if (p.shape !== undefined) node.type = p.shape as Tone.ToneOscillatorType;
-		if (p.rate !== undefined) node.frequency.rampTo(p.rate, 0.02);
-		// `enabled` is read by the mod tick — no Tone-side change needed.
-		// `routes` are also pure data; the tick re-reads patch state each frame.
+		// All LFO logic is software-driven in modTick.
 	}
 
 	/* ----------------------- Public, validated setters ---------------------- */
@@ -1323,54 +1302,63 @@ class AudioEngine {
 		this.#modRaf = requestAnimationFrame(tick);
 	}
 
+	/** Compute the [-1, 1] value of a waveform at a given phase [0, 1) */
+	#waveAt(phase: number, shape: string): number {
+		switch (shape) {
+			case 'square':
+				return phase < 0.5 ? 1 : -1;
+			case 'triangle':
+				return phase < 0.5 ? -1 + 4 * phase : 3 - 4 * phase;
+			case 'sawtooth':
+				return 2 * phase - 1;
+			case 'sine':
+			default:
+				return Math.sin(phase * 2 * Math.PI);
+		}
+	}
+
 	/**
-	 * Per-frame: read each LFO's current value, accumulate contributions to
+	 * Per-frame: advance LFO phases, accumulate contributions to
 	 * each routed target, then write `base + offset + sum(lfo*amount)` to the
-	 * audio graph and into `liveMod` for UI visualization. Targets with no
-	 * routes are not touched (their base value already applied via setters).
+	 * audio graph and into `liveMod` for UI visualization.
 	 */
 	#modTick() {
-		const l1 = this.#lfo1;
-		const l2 = this.#lfo2;
-		// Tone.LFO exposes .value as a getter returning the current output value
-		// in its [min,max] range — here normalized to [-1,1] because we set
-		// min=-1, max=1 at construction.
-		// Tone.LFO has a `.value` getter at runtime but it's not in the public
-		// type definitions, hence the cast.
-		const readLfo = (l: Tone.LFO | null, enabled: boolean): number => {
-			if (!l || !enabled) return 0;
-			const v = (l as unknown as { value: unknown }).value;
-			return typeof v === 'number' ? v : 0;
-		};
-		const v1 = readLfo(l1, this.patch.lfo1.enabled);
-		const v2 = readLfo(l2, this.patch.lfo2.enabled);
+		const now = performance.now();
+		const dt = (now - this.#lastModTime) / 1000; // seconds
+		this.#lastModTime = now;
+
+		// Advance phase
+		if (this.patch.lfo1.enabled) {
+			this.#lfo1Phase = (this.#lfo1Phase + this.patch.lfo1.rate * dt) % 1;
+		}
+		if (this.patch.lfo2.enabled) {
+			this.#lfo2Phase = (this.#lfo2Phase + this.patch.lfo2.rate * dt) % 1;
+		}
+
+		const v1 = this.patch.lfo1.enabled ? this.#waveAt(this.#lfo1Phase, this.patch.lfo1.shape) : 0;
+		const v2 = this.patch.lfo2.enabled ? this.#waveAt(this.#lfo2Phase, this.patch.lfo2.shape) : 0;
 
 		// Mod wheel boost: scales every active route by 1 + mod*1.0 (so at full
 		// wheel routings sound twice as wide, doubling their swing).
 		const wheelBoost = 1 + this.#modulation;
 
-		const contributions = new Map<string, { amount: number; offset: number }>();
+		const contributions = new Map<string, number>();
 		const accumulate = (routes: ModRoute[], lfoVal: number, enabled: boolean) => {
 			if (!enabled) return;
 			for (const r of routes) {
-				const existing = contributions.get(r.target);
+				const existing = contributions.get(r.target) || 0;
 				const add = r.amount * lfoVal * wheelBoost;
-				if (existing) {
-					existing.amount += add;
-					existing.offset += r.offset;
-				} else {
-					contributions.set(r.target, { amount: add, offset: r.offset });
-				}
+				contributions.set(r.target, existing + add);
 			}
 		};
 		accumulate(this.patch.lfo1.routes, v1, this.patch.lfo1.enabled);
 		accumulate(this.patch.lfo2.routes, v2, this.patch.lfo2.enabled);
 
-		for (const [id, c] of contributions) {
+		for (const [id, amount] of contributions) {
 			const t = modTargets.get(id);
 			if (!t) continue;
 			const base = t.getBase();
-			const eff = Math.max(t.min, Math.min(t.max, base + c.offset + c.amount));
+			const eff = Math.max(t.min, Math.min(t.max, base + amount));
 			t.apply(eff);
 			liveMod.set(id, eff);
 		}

@@ -69,13 +69,11 @@ export type Filter = z.infer<typeof FilterSchema>;
  * A single mod-matrix routing: this LFO modulates `target` (a stable param
  * id like 'filter.cutoff' or 'osc1.fine'). `amount` is the swing applied to
  * the modulated parameter in its own units (e.g. ±Hz for cutoff, ±dB for
- * level, ±cents for fine). `offset` is a constant bias added on top of the
- * user-set base value.
+ * level, ±cents for fine).
  */
 export const ModRouteSchema = z.object({
 	target: z.string().min(1),
-	amount: z.number().default(0),
-	offset: z.number().default(0)
+	amount: z.number().default(0)
 });
 export type ModRoute = z.infer<typeof ModRouteSchema>;
 
@@ -216,9 +214,7 @@ function migrateLegacyLfo(raw: unknown): unknown {
 	const depth = typeof old.depth === 'number' ? old.depth : 0;
 	const existingRoutes = Array.isArray(old.routes) ? (old.routes as unknown[]) : [];
 	const routes =
-		existingRoutes.length > 0
-			? existingRoutes
-			: [{ target: 'filter.cutoff', amount: depth, offset: 0 }];
+		existingRoutes.length > 0 ? existingRoutes : [{ target: 'filter.cutoff', amount: depth }];
 	const lfo1 = { ...old, routes };
 	const lfo2 = { rate: 4, depth: 0, enabled: false, shape: 'sine', routes: [] };
 	const { lfo: _drop, ...rest } = r;
@@ -311,7 +307,7 @@ export const defaultPatch: Patch = {
 		depth: 1500,
 		enabled: false,
 		shape: 'sine',
-		routes: [{ target: 'filter.cutoff', amount: 1500, offset: 0 }]
+		routes: [{ target: 'filter.cutoff', amount: 1500 }]
 	},
 	lfo2: { rate: 2, depth: 0, enabled: false, shape: 'triangle', routes: [] },
 	sub: { level: -6, octave: -1, enabled: false, type: 'sine', pan: 0 },

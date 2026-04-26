@@ -41,8 +41,8 @@
 
 	// Mod-routing introspection: which LFOs route to this target?
 	const routes = $derived.by(() => {
-		if (!target) return [] as Array<{ which: 'lfo1' | 'lfo2'; amount: number; offset: number }>;
-		const out: Array<{ which: 'lfo1' | 'lfo2'; amount: number; offset: number }> = [];
+		if (!target) return [] as Array<{ which: 'lfo1' | 'lfo2'; amount: number }>;
+		const out: Array<{ which: 'lfo1' | 'lfo2'; amount: number }> = [];
 		for (const w of ['lfo1', 'lfo2'] as const) {
 			const r = audio.patch[w].routes.find((r) => r.target === target);
 			if (r && audio.patch[w].enabled) out.push({ which: w, ...r });
@@ -52,7 +52,6 @@
 
 	// Sum of route amounts for the static "swing" arc visualization.
 	const totalAmount = $derived(routes.reduce((s, r) => s + Math.abs(r.amount), 0));
-	const totalOffset = $derived(routes.reduce((s, r) => s + r.offset, 0));
 
 	// Live modulated value (updated by engine rAF). Drives the moving dot.
 	let live = $state<number | null>(null);
@@ -117,9 +116,9 @@
 		return START + valueToNorm(v) * ARC;
 	}
 
-	const ringCenterAngle = $derived(valueToAngle(value + totalOffset));
-	const ringMinAngle = $derived(valueToAngle(value + totalOffset - totalAmount));
-	const ringMaxAngle = $derived(valueToAngle(value + totalOffset + totalAmount));
+	const ringCenterAngle = $derived(valueToAngle(value));
+	const ringMinAngle = $derived(valueToAngle(value - totalAmount));
+	const ringMaxAngle = $derived(valueToAngle(value + totalAmount));
 	const ringStart = $derived(polar(ringMinAngle, rRing));
 	const ringEnd = $derived(polar(ringMaxAngle, rRing));
 	const ringLargeArc = $derived(Math.abs(ringMaxAngle - ringMinAngle) > 180 ? 1 : 0);
