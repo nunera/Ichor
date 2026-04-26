@@ -29,6 +29,7 @@
 - 30+ built-in presets in a floating, physics-based picker (drag nodes, hover to highlight category connections, click to load)
 - Live JSON patch editor (Cmd/Ctrl-S to apply) tucked behind a sliding trapezoid flag on the left edge
 - Three Catppuccin themes: **latte**, **mocha**, **sky** (mocha with a sky-blue accent + purple secondary)
+- **Live multiplayer sessions** via Cloudflare Durable Objects: click "share" → get a URL → anyone who opens it edits the same patch in real time, with presence count
 
 ---
 
@@ -59,6 +60,27 @@ pnpm build
 pnpm preview
 ```
 
+### When to run `pnpm gen`
+
+`pnpm gen` runs `wrangler types`, regenerating `worker-configuration.d.ts`
+from `wrangler.jsonc`. The build script enforces these stay in sync via
+`wrangler types --check` and will fail with:
+
+```
+Types at worker-configuration.d.ts are out of date. Run `wrangler types` to regenerate.
+```
+
+Run `pnpm gen` whenever you:
+
+- add, remove, or rename a binding in `wrangler.jsonc` (Durable Object,
+  KV, R2, D1, vars, secrets, etc.)
+- change the `compatibility_date` or `compatibility_flags`
+- add a new Durable Object class to the `migrations` array
+
+You don't need to run it after every change to your code — only after
+`wrangler.jsonc` changes. The generated file is committed to git so CI
+also stays in sync.
+
 ### Deploy to Cloudflare
 
 The project is configured with the Cloudflare Workers adapter (`wrangler.jsonc` is included).
@@ -67,6 +89,17 @@ The project is configured with the Cloudflare Workers adapter (`wrangler.jsonc` 
 pnpm build
 pnpm dlx wrangler deploy
 ```
+
+`pnpm build` runs three steps in order:
+
+1. `wrangler types --check` — verifies `worker-configuration.d.ts` matches
+   `wrangler.jsonc`. Run `pnpm gen` if it complains.
+2. `vite build` — builds the SvelteKit app into `.svelte-kit/cloudflare/`.
+3. `node scripts/inject-do.mjs` — esbuild-bundles the Durable Object
+   classes (`PatchSession`, `Registry`) and appends them to the generated
+   `_worker.js` so wrangler can find them. The Cloudflare adapter doesn't
+   natively support DO exports, so this post-build step is required for
+   the multiplayer session feature to work.
 
 ### Run locally only
 
@@ -84,6 +117,10 @@ src/
       engine.svelte.ts  # AudioEngine: Tone graph, validated setters,
                         # subscribe API, write-source tagging
       presets.ts        # Built-in presets grouped by category
+    server/
+      PatchSession.ts       # Durable Object: holds canonical patch, fans out updates
+    audio/
+      session.svelte.ts     # Client-side websocket sync, coalesced per-frame
     ui/
       Keyboard.svelte       # Multi-octave keyboard, glissando, octave shift
       SoundDesign.svelte    # Two-row grid: osc1 / osc2 / filter then env / lfo
@@ -130,8 +167,7 @@ pnpm dlx sv@0.15.1 create --template minimal --types ts \
 
 Built in public, in small increments. The rough direction, loosest to firmest:
 
-- **next:** Strudel param hook (sequencing handled externally), URL-hash share links
-- **then:** Cloudflare Durable Object websocket sync (live multiplayer patches)
+- **next:** Strudel param hook (sequencing handled externally)
 - effects rack (reverb, delay, distortion, eq, comp)
 - pitch bend + mod wheel, Web MIDI
 - sampling (mic, file, tab capture)

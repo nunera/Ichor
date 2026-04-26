@@ -9,5 +9,15 @@
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
-	"preview_urls": true
+	"preview_urls": true,
+	"durable_objects": {
+		"bindings": [
+			{ "name": "PATCH_SESSION", "class_name": "PatchSession" },
+			{ "name": "REGISTRY", "class_name": "Registry" }
+		]
+	},
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["PatchSession"] },
+		{ "tag": "v2", "new_sqlite_classes": ["Registry"] }
+	]
 }

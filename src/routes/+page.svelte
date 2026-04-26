@@ -5,6 +5,8 @@
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
 	import Visualizer from '$lib/ui/Visualizer.svelte';
 	import PatchEditor from '$lib/ui/PatchEditor.svelte';
+	import SessionBadge from '$lib/ui/SessionBadge.svelte';
+	import BrowseSessions from '$lib/ui/BrowseSessions.svelte';
 
 	let volume = $state(-12);
 	let vizMode = $state<'scope' | 'spectrum'>('scope');
@@ -63,7 +65,9 @@
 			</button>
 		</div>
 
-		<div class="relative flex items-center gap-6">
+		<div class="relative flex items-center gap-3">
+			<BrowseSessions />
+			<SessionBadge />
 			<label class="flex items-center gap-2 text-xs text-subtext1">
 				master
 				<input type="range" min="-40" max="0" step="1" bind:value={volume} class="accent-mauve" />
