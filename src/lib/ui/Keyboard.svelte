@@ -117,8 +117,16 @@
 		return Math.max(lo, Math.min(hi, v));
 	}
 
+	function isTextTarget(t: EventTarget | null): boolean {
+		const el = t as HTMLElement | null;
+		if (!el) return false;
+		const tag = el.tagName;
+		return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+	}
+
 	async function onKeyDown(e: KeyboardEvent) {
 		if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+		if (isTextTarget(e.target)) return;
 		if (e.key === 'z') {
 			e.preventDefault();
 			shift(-1);
@@ -137,6 +145,7 @@
 	}
 
 	function onKeyUp(e: KeyboardEvent) {
+		if (isTextTarget(e.target)) return;
 		const k = keys.find((x) => x.key === e.key.toLowerCase());
 		if (k) release(k.note);
 	}
@@ -182,7 +191,7 @@
 	</div>
 
 	<div
-		class="relative flex h-48 w-full touch-none select-none"
+		class="relative flex h-32 w-full touch-none select-none"
 		onpointerdown={onPointerDown}
 		onpointermove={onPointerMove}
 		onpointerup={onPointerUp}

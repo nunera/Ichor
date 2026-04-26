@@ -1,31 +1,31 @@
 import * as Tone from 'tone';
+import {
+	defaultPatch,
+	validateSection,
+	validatePatch,
+	type Patch,
+	type OscPatch,
+	type Envelope,
+	type Filter,
+	type LFO
+} from './patch';
 
-export type Waveform = 'sine' | 'square' | 'sawtooth' | 'triangle';
+export type { Patch, OscPatch, Waveform } from './patch';
+export { defaultPatch } from './patch';
 
-export type OscPatch = {
-	type: Waveform;
-	level: number;
-	octave: number; // -3..+3
-	semi: number; // -12..+12
-	fine: number; // -50..+50 cents
-	enabled: boolean;
-};
+/**
+ * Where a patch write came from. The bidirectional sync layer (JSON editor,
+ * network, persistence) will subscribe to writes and ignore ones with its
+ * own source tag, preventing echo loops.
+ */
+export type WriteSource = 'ui' | 'remote' | 'editor' | 'midi' | 'init';
 
-export type Patch = {
-	osc1: OscPatch;
-	osc2: OscPatch;
-	env: { attack: number; hold: number; decay: number; sustain: number; release: number };
-	filter: { cutoff: number; resonance: number };
-	lfo: { rate: number; depth: number; enabled: boolean };
-};
-
-export const defaultPatch: Patch = {
-	osc1: { type: 'sawtooth', level: 0, octave: 0, semi: 0, fine: 0, enabled: true },
-	osc2: { type: 'square', level: -6, octave: 0, semi: 0, fine: 7, enabled: true },
-	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
-	filter: { cutoff: 4000, resonance: 2 },
-	lfo: { rate: 4, depth: 1500, enabled: false }
-};
+export type WriteEvent =
+	| { source: WriteSource; section: 'osc1' | 'osc2'; value: Partial<OscPatch> }
+	| { source: WriteSource; section: 'env'; value: Partial<Envelope> }
+	| { source: WriteSource; section: 'filter'; value: Partial<Filter> }
+	| { source: WriteSource; section: 'lfo'; value: Partial<LFO> }
+	| { source: WriteSource; section: 'all'; value: Patch };
 
 class AudioEngine {
 	started = $state(false);
@@ -42,6 +42,18 @@ class AudioEngine {
 	#fft: Tone.Analyser | null = null;
 	#held = new Set<string>();
 
+	#listeners = new Set<(e: WriteEvent) => void>();
+
+	/** Subscribe to patch writes. Returns an unsubscribe fn. */
+	subscribe(fn: (e: WriteEvent) => void): () => void {
+		this.#listeners.add(fn);
+		return () => this.#listeners.delete(fn);
+	}
+
+	#emit(e: WriteEvent) {
+		for (const fn of this.#listeners) fn(e);
+	}
+
 	async start() {
 		if (this.started) return;
 		await Tone.start();
@@ -53,7 +65,6 @@ class AudioEngine {
 			rolloff: -24
 		}).toDestination();
 
-		// Tap analyser AFTER the filter so visualizers reflect the actual output.
 		this.#analyser = new Tone.Analyser('waveform', 1024);
 		this.#fft = new Tone.Analyser('fft', 1024);
 		this.#filter.fan(this.#analyser, this.#fft);
@@ -135,9 +146,8 @@ class AudioEngine {
 		this.#osc2?.set({ envelope: env });
 	}
 
-	#setOsc(which: 'osc1' | 'osc2', p: Partial<OscPatch>) {
+	#applyOsc(which: 'osc1' | 'osc2', p: Partial<OscPatch>) {
 		const target = this.patch[which];
-		Object.assign(target, p);
 		const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
 		const gain = which === 'osc1' ? this.#osc1Gain : this.#osc2Gain;
 
@@ -151,26 +161,12 @@ class AudioEngine {
 		}
 	}
 
-	setOsc1(p: Partial<OscPatch>) {
-		this.#setOsc('osc1', p);
-	}
-	setOsc2(p: Partial<OscPatch>) {
-		this.#setOsc('osc2', p);
-	}
-
-	setEnvelope(p: Partial<Patch['env']>) {
-		Object.assign(this.patch.env, p);
-		this.#applyEnvelope();
-	}
-
-	setFilter(p: Partial<Patch['filter']>) {
-		Object.assign(this.patch.filter, p);
+	#applyFilter(p: Partial<Filter>) {
 		if (p.cutoff !== undefined) this.#cutoffSignal?.rampTo(p.cutoff, 0.02);
 		if (p.resonance !== undefined) this.#filter?.Q.rampTo(p.resonance, 0.02);
 	}
 
-	setLFO(p: Partial<Patch['lfo']>) {
-		Object.assign(this.patch.lfo, p);
+	#applyLFO(p: Partial<LFO>) {
 		if (!this.#lfo) return;
 		if (p.rate !== undefined) this.#lfo.frequency.rampTo(p.rate, 0.02);
 		if (p.depth !== undefined || p.enabled !== undefined) {
@@ -178,6 +174,62 @@ class AudioEngine {
 			this.#lfo.min = -d;
 			this.#lfo.max = d;
 		}
+	}
+
+	/* ----------------------- Public, validated setters ---------------------- */
+
+	setOsc1(p: Partial<OscPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('osc1', p);
+		Object.assign(this.patch.osc1, v);
+		this.#applyOsc('osc1', v);
+		this.#emit({ source, section: 'osc1', value: v });
+	}
+
+	setOsc2(p: Partial<OscPatch>, source: WriteSource = 'ui') {
+		const v = validateSection('osc2', p);
+		Object.assign(this.patch.osc2, v);
+		this.#applyOsc('osc2', v);
+		this.#emit({ source, section: 'osc2', value: v });
+	}
+
+	setEnvelope(p: Partial<Envelope>, source: WriteSource = 'ui') {
+		const v = validateSection('env', p);
+		Object.assign(this.patch.env, v);
+		this.#applyEnvelope();
+		this.#emit({ source, section: 'env', value: v });
+	}
+
+	setFilter(p: Partial<Filter>, source: WriteSource = 'ui') {
+		const v = validateSection('filter', p);
+		Object.assign(this.patch.filter, v);
+		this.#applyFilter(v);
+		this.#emit({ source, section: 'filter', value: v });
+	}
+
+	setLFO(p: Partial<LFO>, source: WriteSource = 'ui') {
+		const v = validateSection('lfo', p);
+		Object.assign(this.patch.lfo, v);
+		this.#applyLFO(v);
+		this.#emit({ source, section: 'lfo', value: v });
+	}
+
+	/**
+	 * Replace the entire patch atomically. Validates the full schema first;
+	 * applies every section to the audio graph; emits a single 'all' event.
+	 */
+	loadPatch(value: unknown, source: WriteSource = 'editor') {
+		const next = validatePatch(value);
+		this.patch.osc1 = { ...next.osc1 };
+		this.patch.osc2 = { ...next.osc2 };
+		this.patch.env = { ...next.env };
+		this.patch.filter = { ...next.filter };
+		this.patch.lfo = { ...next.lfo };
+		this.#applyOsc('osc1', this.patch.osc1);
+		this.#applyOsc('osc2', this.patch.osc2);
+		this.#applyEnvelope();
+		this.#applyFilter(this.patch.filter);
+		this.#applyLFO(this.patch.lfo);
+		this.#emit({ source, section: 'all', value: next });
 	}
 
 	setVolume(db: number) {

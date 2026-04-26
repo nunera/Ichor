@@ -94,7 +94,9 @@
 	});
 </script>
 
-<section class="flex flex-col gap-2 rounded-lg border border-surface0 bg-mantle/60 p-3">
+<section
+	class="flex h-full min-h-0 flex-col gap-2 rounded-lg border border-surface0 bg-mantle/60 p-3"
+>
 	<header class="flex items-center gap-2">
 		<span class="text-xs tracking-widest text-subtext0 uppercase">visualizer</span>
 		<div class="ml-auto flex gap-1 text-[10px]">
@@ -120,5 +122,5 @@
 			</button>
 		</div>
 	</header>
-	<canvas bind:this={canvas} class="h-32 w-full rounded-md bg-base"></canvas>
+	<canvas bind:this={canvas} class="min-h-0 w-full flex-1 rounded-md bg-base"></canvas>
 </section>

@@ -23,7 +23,7 @@
 </script>
 
 <section
-	class="flex flex-col gap-3 rounded-lg border border-surface0 bg-mantle/60 p-3"
+	class="flex h-full min-h-0 flex-col gap-2 rounded-lg border border-surface0 bg-mantle/60 p-3"
 	class:opacity-50={!osc.enabled}
 >
 	<header class="flex items-center gap-2">
@@ -55,15 +55,15 @@
 		>
 	</div>
 
-	<!-- Pitch row -->
-	<div class="flex justify-around">
+	<!-- All four knobs on one row -->
+	<div class="flex items-end justify-around gap-1">
 		<Knob
 			label="oct"
 			value={osc.octave}
 			min={-3}
 			max={3}
 			step={1}
-			size={40}
+			size={36}
 			format={(v) => (v > 0 ? `+${v}` : `${v}`)}
 			onchange={(v) => set({ octave: v })}
 		/>
@@ -73,7 +73,7 @@
 			min={-12}
 			max={12}
 			step={1}
-			size={40}
+			size={36}
 			format={(v) => (v > 0 ? `+${v}` : `${v}`)}
 			onchange={(v) => set({ semi: v })}
 		/>
@@ -83,21 +83,17 @@
 			min={-50}
 			max={50}
 			step={1}
-			size={40}
+			size={36}
 			unit=" ct"
 			onchange={(v) => set({ fine: v })}
 		/>
-	</div>
-
-	<!-- Level -->
-	<div class="flex justify-center">
 		<Knob
 			label="level"
 			value={osc.level}
 			min={-40}
 			max={6}
 			step={1}
-			size={48}
+			size={36}
 			unit=" dB"
 			onchange={(v) => set({ level: v })}
 		/>

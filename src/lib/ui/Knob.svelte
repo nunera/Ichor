@@ -108,7 +108,7 @@
 	}
 </script>
 
-<div class="flex flex-col items-center gap-1 select-none">
+<div class="flex min-w-0 flex-col items-center gap-0.5 select-none">
 	<svg
 		viewBox="0 0 {size} {size}"
 		width={size}

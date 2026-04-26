@@ -108,8 +108,8 @@
 	}
 </script>
 
-<div class="flex flex-col gap-2">
-	<div class="flex items-baseline justify-between">
+<div class="flex h-full min-h-0 flex-col gap-2">
+	<div class="flex shrink-0 items-baseline justify-between">
 		<h3 class="text-xs tracking-widest text-subtext0 uppercase">envelope</h3>
 		<span class="text-[10px] text-overlay1">drag the dots</span>
 	</div>
@@ -117,7 +117,8 @@
 	<svg
 		bind:this={svgEl}
 		viewBox="0 0 {totalW} {H}"
-		class="w-full touch-none rounded-md bg-mantle"
+		preserveAspectRatio="none"
+		class="min-h-0 w-full flex-1 touch-none rounded-md bg-mantle"
 		onpointermove={onMove}
 		onpointerup={onUp}
 		onpointercancel={onUp}
@@ -214,7 +215,7 @@
 		</g>
 	</svg>
 
-	<div class="grid grid-cols-5 gap-2">
+	<div class="grid shrink-0 grid-cols-5 gap-2">
 		<div class="flex justify-center">
 			<Knob
 				label="attack"
