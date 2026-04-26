@@ -46,7 +46,7 @@
 				'\u201coscillators,\u201d then shapes them with filters, envelopes, and effects to create ' +
 				'anything from soft pads to gritty basses to alien noises.\n\n' +
 				'In ichor, you press a key (or click the keyboard at the bottom) and a tone comes out. ' +
-				'Everything else on screen \u2014 the knobs, the buttons, the drawers \u2014 lets you ' +
+				'Everything else on screen - the knobs, the buttons, the drawers - lets you ' +
 				'sculpt that tone into whatever you want.'
 		},
 		{
@@ -60,9 +60,9 @@
 				'\u2022 TRIANGLE: like a sine but slightly brighter. Soft and clean.\n' +
 				'\u2022 SQUARE: hollow, woody, classic 8-bit. Like a clarinet or NES game.\n' +
 				'\u2022 SAWTOOTH: bright, buzzy, full of harmonics. The classic synth lead/bass.\n' +
-				'\u2022 PULSE: a square with adjustable width \u2014 narrow widths sound nasal/reedy.\n\n' +
+				'\u2022 PULSE: a square with adjustable width - narrow widths sound nasal/reedy.\n\n' +
 				'Ichor has TWO oscillators (osc 1 and osc 2) so you can layer two waveforms together. ' +
-				'Try detuning them slightly with the FINE knob \u2014 it makes everything sound thicker.'
+				'Try detuning them slightly with the FINE knob - it makes everything sound thicker.'
 		},
 		{
 			icon: CircleDot,
@@ -75,7 +75,7 @@
 				'\u2022 SCROLL while hovering for precise tweaks\n\n' +
 				'The little ring around the knob shows the current value. The number underneath ' +
 				'tells you the exact amount and unit (Hz, dB, %, etc).\n\n' +
-				"Don't be afraid to crank knobs to extremes \u2014 most of the fun comes from " +
+				"Don't be afraid to crank knobs to extremes - most of the fun comes from " +
 				'breaking things in interesting ways!'
 		},
 		{
@@ -90,7 +90,7 @@
 				'\u2022 DECAY: how long it takes to drop from full to the sustain level.\n' +
 				'\u2022 SUSTAIN: the volume held while you keep the key pressed.\n' +
 				'\u2022 RELEASE: how long it fades OUT after you release the key.\n\n' +
-				'The shape on the envelope panel actually shows your settings in real time \u2014 ' +
+				'The shape on the envelope panel actually shows your settings in real time - ' +
 				'you can drag the dots to edit it visually instead of using knobs!'
 		},
 		{
@@ -100,20 +100,20 @@
 			body:
 				'A filter sculpts the brightness of your sound by removing certain frequencies. Think ' +
 				'of it like a tone control on steroids.\n\n' +
-				'\u2022 LOWPASS (LP): removes high frequencies \u2014 makes things mellower/darker.\n' +
-				'\u2022 HIGHPASS (HP): removes low frequencies \u2014 thins things out, removes bass.\n' +
-				'\u2022 BANDPASS (BP): keeps only a narrow band \u2014 telephone/honky tone.\n' +
-				'\u2022 NOTCH (NT): removes a narrow band \u2014 phaser/comb-like effects.\n\n' +
+				'\u2022 LOWPASS (LP): removes high frequencies - makes things mellower/darker.\n' +
+				'\u2022 HIGHPASS (HP): removes low frequencies - thins things out, removes bass.\n' +
+				'\u2022 BANDPASS (BP): keeps only a narrow band - telephone/honky tone.\n' +
+				'\u2022 NOTCH (NT): removes a narrow band - phaser/comb-like effects.\n\n' +
 				'CUTOFF sets where the filter starts cutting. RESONANCE boosts frequencies right at ' +
-				'the cutoff point \u2014 high resonance creates that classic squelchy "wah" sound.\n\n' +
-				'Try sweeping the cutoff while playing a chord \u2014 instant acid bassline vibes.'
+				'the cutoff point - high resonance creates that classic squelchy "wah" sound.\n\n' +
+				'Try sweeping the cutoff while playing a chord - instant acid bassline vibes.'
 		},
 		{
 			icon: Waves,
 			title: 'The LFO (Low Frequency Oscillator)',
 			visual: 'lfo',
 			body:
-				"An LFO is just an oscillator that's TOO SLOW to be heard \u2014 instead it's used to " +
+				"An LFO is just an oscillator that's TOO SLOW to be heard - instead it's used to " +
 				"wobble other parameters. Ichor's LFO is wired to the filter cutoff by default.\n\n" +
 				'\u2022 RATE: how fast the wobble happens (in Hz, cycles per second)\n' +
 				'\u2022 DEPTH: how much it wobbles (small = subtle vibrato, large = dramatic sweep)\n' +
@@ -121,7 +121,7 @@
 				'Slow LFO + lots of depth = dub-style filter sweeps.\n' +
 				'Fast LFO + a bit of depth = vibrato or tremolo.\n\n' +
 				'Tip: even with the LFO disabled, the MOD WHEEL on the left side of the keyboard ' +
-				"adds extra LFO depth \u2014 play around with it while you're holding a note!"
+				"adds extra LFO depth - play around with it while you're holding a note!"
 		},
 		{
 			icon: Layers,
@@ -131,11 +131,11 @@
 				'Want that big, rich, "supersaw" sound from EDM and trance music? You need UNISON.\n\n' +
 				'When unison is set to more than 1 voice, the oscillator stacks multiple copies of ' +
 				'itself slightly detuned from each other. The SPREAD knob controls how detuned they ' +
-				'are (in cents \u2014 100 cents = 1 semitone).\n\n' +
+				'are (in cents - 100 cents = 1 semitone).\n\n' +
 				'\u2022 1 voice = clean, pure tone\n' +
 				'\u2022 3-5 voices, low spread = warm, thicker tone\n' +
 				'\u2022 7+ voices, high spread = massive, swirling supersaw lead\n\n' +
-				'Unison only works on the BASIC synth engine \u2014 FM, AM, and Pluck have other ways ' +
+				'Unison only works on the BASIC synth engine - FM, AM, and Pluck have other ways ' +
 				'of getting rich tones.'
 		},
 		{
@@ -143,15 +143,15 @@
 			title: 'Synth Engines (BASIC / FM / AM / Pluck)',
 			body:
 				'Each oscillator slot can use one of four different SYNTHESIS ENGINES:\n\n' +
-				'\u2022 BASIC \u2014 classic subtractive synthesis. The waveform you pick gets shaped ' +
+				'\u2022 BASIC - classic subtractive synthesis. The waveform you pick gets shaped ' +
 				'by the filter and envelope. This is what 99% of synths do.\n\n' +
-				'\u2022 FM (Frequency Modulation) \u2014 one oscillator modulates the pitch of another, ' +
+				'\u2022 FM (Frequency Modulation) - one oscillator modulates the pitch of another, ' +
 				'creating bell-like, metallic, glassy tones. Famous from the Yamaha DX7 (Whitney ' +
 				'Houston, A-ha, etc). Try high HARMONICITY values for bells.\n\n' +
-				'\u2022 AM (Amplitude Modulation) \u2014 one oscillator modulates the volume of another, ' +
+				'\u2022 AM (Amplitude Modulation) - one oscillator modulates the volume of another, ' +
 				'making ring-mod sidebands. Eerie, sci-fi, alien sounds.\n\n' +
-				'\u2022 PLUCK \u2014 simulates a plucked string using physics (Karplus-Strong). Great ' +
-				'for guitars, harps, kalimba, koto. Has no envelope \u2014 it self-decays naturally.\n\n' +
+				'\u2022 PLUCK - simulates a plucked string using physics (Karplus-Strong). Great ' +
+				'for guitars, harps, kalimba, koto. Has no envelope - it self-decays naturally.\n\n' +
 				'You can MIX engines: Osc 1 = Pluck for the body, Osc 2 = FM for shimmer = beautiful ' +
 				'electric piano.'
 		},
@@ -160,10 +160,10 @@
 			title: 'Sub Oscillator & Noise',
 			body:
 				'These are two extra layers that sit alongside Osc 1 and Osc 2:\n\n' +
-				'\u2022 SUB OSC \u2014 a simple oscillator that always plays one or two octaves BELOW ' +
+				'\u2022 SUB OSC - a simple oscillator that always plays one or two octaves BELOW ' +
 				'the note you press. Adds weight to bass sounds. Toggle it on for any patch that ' +
 				'needs more low-end thump.\n\n' +
-				'\u2022 NOISE \u2014 random hiss that follows your envelope. Three flavors:\n' +
+				'\u2022 NOISE - random hiss that follows your envelope. Three flavors:\n' +
 				'  \u2022 WHITE: bright hiss (cymbal/wind sounds)\n' +
 				'  \u2022 PINK: warmer hiss (rain, ocean)\n' +
 				'  \u2022 BROWN: dark rumble (thunder)\n\n' +
@@ -175,12 +175,12 @@
 			title: 'Voice Modes (Poly / Mono / Legato / Scale)',
 			body:
 				'Voice modes change HOW notes are played:\n\n' +
-				'\u2022 POLY \u2014 multiple notes at once (chords). Default for most patches.\n\n' +
-				'\u2022 MONO \u2014 only one note at a time. New notes cut off old ones. Best for ' +
+				'\u2022 POLY - multiple notes at once (chords). Default for most patches.\n\n' +
+				'\u2022 MONO - only one note at a time. New notes cut off old ones. Best for ' +
 				'leads and basslines.\n\n' +
-				'\u2022 LEGATO \u2014 like mono, but with GLIDE. Notes slide from one pitch to the ' +
+				'\u2022 LEGATO - like mono, but with GLIDE. Notes slide from one pitch to the ' +
 				'next when you play overlapping. The GLIDE knob sets how long the slide takes.\n\n' +
-				'\u2022 SCALE \u2014 like legato, but the glide time scales with how far apart the ' +
+				'\u2022 SCALE - like legato, but the glide time scales with how far apart the ' +
 				'notes are. A small interval glides fast, a big leap glides slowly.\n\n' +
 				'Set up a synth lead patch in MONO with some glide for that classic Moog/TB-303 vibe.'
 		},
@@ -190,11 +190,11 @@
 			body:
 				'Click the EFFECTS tab on the right edge of the screen to open the effects rack. ' +
 				'These post-process your sound to make it bigger, weirder, or both:\n\n' +
-				'\u2022 DISTORTION \u2014 adds harmonics, makes things crunchy/aggressive\n' +
-				'\u2022 BITCRUSHER \u2014 reduces bit depth for that lo-fi, chiptune, "broken" sound\n' +
-				'\u2022 CHORUS \u2014 doubles your sound with detuned copies, adds width and shimmer\n' +
-				'\u2022 DELAY \u2014 echoes that bounce in stereo (ping-pong). Great for atmosphere.\n' +
-				'\u2022 REVERB \u2014 adds the sense of being in a room/hall/cathedral\n\n' +
+				'\u2022 DISTORTION - adds harmonics, makes things crunchy/aggressive\n' +
+				'\u2022 BITCRUSHER - reduces bit depth for that lo-fi, chiptune, "broken" sound\n' +
+				'\u2022 CHORUS - doubles your sound with detuned copies, adds width and shimmer\n' +
+				'\u2022 DELAY - echoes that bounce in stereo (ping-pong). Great for atmosphere.\n' +
+				'\u2022 REVERB - adds the sense of being in a room/hall/cathedral\n\n' +
 				'Each effect has its own MIX knob (wet/dry blend) and a checkbox to enable it. ' +
 				'Order matters! Effects are chained left-to-right. Try chorus + delay + reverb on ' +
 				'a pluck for absolutely magical ambient sounds.'
@@ -203,12 +203,12 @@
 			icon: SlidersHorizontal,
 			title: 'The Pitch Bend & Mod Wheels',
 			body:
-				'On the LEFT side of the keyboard you have two vertical sliders \u2014 these mimic ' +
+				'On the LEFT side of the keyboard you have two vertical sliders - these mimic ' +
 				'real synth keyboards:\n\n' +
-				'\u2022 PITCH BEND \u2014 drag up/down to bend notes \u00B12 semitones. SPRINGS BACK ' +
+				'\u2022 PITCH BEND - drag up/down to bend notes \u00B12 semitones. SPRINGS BACK ' +
 				'to center when you let go (like a real bend wheel). Great for guitar-style note ' +
 				'slides while holding a key.\n\n' +
-				'\u2022 MOD WHEEL \u2014 drag up to add modulation. Stays where you put it. Boosts the ' +
+				'\u2022 MOD WHEEL - drag up to add modulation. Stays where you put it. Boosts the ' +
 				'LFO depth, so even with the LFO turned off, raising the mod wheel introduces a ' +
 				'cutoff sweep. Adds expression to held notes.'
 		},
@@ -217,22 +217,22 @@
 			title: 'Strudel: live coding patterns',
 			body:
 				'Click the STRUDEL tab on the right to open a code editor. Strudel is a mini ' +
-				'language for generating musical patterns \u2014 you write code, and the synth ' +
+				'language for generating musical patterns - you write code, and the synth ' +
 				'plays your code in real time.\n\n' +
 				'Example: `note("c3 eb3 g3 bb3").s("ichor").slow(2)`\n\n' +
 				'This plays a C minor 7 arpeggio across 2 cycles. You can chain on synth params ' +
 				'too: `.cutoff(sine.range(0.1, 0.9))` makes the filter sweep automatically. ' +
 				'Press CMD+ENTER (or CTRL+ENTER) to play your code.\n\n' +
-				'Strudel is a whole world unto itself \u2014 google "strudel cycles" for full docs.'
+				'Strudel is a whole world unto itself - google "strudel cycles" for full docs.'
 		},
 		{
 			icon: Cloud,
 			title: 'Presets & Sharing',
 			body:
-				'Click the PATCH tab on the LEFT side to open the preset cloud \u2014 a giant floating ' +
+				'Click the PATCH tab on the LEFT side to open the preset cloud - a giant floating ' +
 				'physics-based blob of 327 presets organized by category (bass, lead, pad, keys, etc). ' +
 				'Hover one to preview, click to load.\n\n' +
-				"You can also click SHARE in the top bar to get a URL anyone can open \u2014 they'll " +
+				"You can also click SHARE in the top bar to get a URL anyone can open - they'll " +
 				'see your patch live, and any knob you turn updates on their screen instantly. ' +
 				'Multiplayer synth jam time.\n\n' +
 				'Click BROWSE to see other public sessions currently online.'
