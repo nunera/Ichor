@@ -245,6 +245,7 @@
 		<div class="flex justify-center">
 			<Knob
 				label="attack"
+				target="env.attack"
 				value={env.attack}
 				min={0.001}
 				max={2}
@@ -258,6 +259,7 @@
 		<div class="flex justify-center">
 			<Knob
 				label="hold"
+				target="env.hold"
 				value={env.hold}
 				min={0}
 				max={2}
@@ -271,6 +273,7 @@
 		<div class="flex justify-center">
 			<Knob
 				label="decay"
+				target="env.decay"
 				value={env.decay}
 				min={0.001}
 				max={2}
@@ -284,6 +287,7 @@
 		<div class="flex justify-center">
 			<Knob
 				label="sustain"
+				target="env.sustain"
 				value={env.sustain}
 				min={0}
 				max={1}
@@ -296,6 +300,7 @@
 		<div class="flex justify-center">
 			<Knob
 				label="release"
+				target="env.release"
 				value={env.release}
 				min={0.001}
 				max={4}

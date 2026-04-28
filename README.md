@@ -30,7 +30,13 @@ A playable, hackable synth in the browser:
 - **Noise generator** (white / pink / brown) with level + pan
 - AHDSR envelope with a draggable visual editor and matching knobs
 - Multi-mode filter (lowpass / highpass / bandpass / notch) with cutoff + resonance
-- LFO → cutoff with rate, depth, shape (sine / square / saw), enable
+- **Two LFOs** with rate + shape (sine / square / triangle / saw), each routable to virtually any continuous parameter via drag-and-drop
+  - Drag an LFO's title onto any knob — a verlet-physics cable dangles from the title to the cursor; release on a knob to attach
+  - Modulation amount is per-route, expressed in _knob-space_ (0–50% of dial travel) so it feels consistent across exponential params like cutoff
+  - Routed knobs render a yellow arc ring sized to the modulation depth, with a live indicator dot tracking the LFO's current value
+  - **Per-route `amt` is itself a knob** — drop another LFO onto it for evolving depth modulation; LFO rate is also modulatable (LFO2 → LFO1.rate gives classic FM-style sweeps)
+  - Drag a rope over the **effects** tab and the drawer auto-opens, so you can route LFOs to any FX knob without preopening
+- **Arpeggiator** with up / down / up-down / random patterns, 1–4 octaves, gate, latch, and a one-tap export to Strudel
 - **Voice modes:** poly / mono / legato / scale, with glide time
   - Glide implemented via parallel mono `Tone.Synth` instances (PolySynth doesn't support portamento)
   - Pluck voicing uses a per-note `PluckSynth` Map (PluckSynth isn't `Monophonic`)
@@ -44,13 +50,13 @@ A playable, hackable synth in the browser:
 ### Performance & I/O
 
 - Multi-octave keyboard (3 octaves) with mouse glissando, two rows of keybinds (`a–j` / `k–'`), `z` / `x` to shift octave
-- **Pitch bend wheel** (±2 semitones, springs back) and **mod wheel** (boosts LFO depth)
+- **Pitch bend wheel** (±2 semitones, springs back) and **mod wheel** (scales every active LFO routing in real time)
 - **Web MIDI** input support
 
 ### UI
 
 - Live oscilloscope + spectrum analyser as the page header background
-- 300+ built-in presets in a floating, physics-based picker (drag, hover, click to load)
+- 300+ built-in presets in a floating, physics-based picker — **hover or arrow-key to preview** (auto-restores your working patch when you leave), click or Enter to commit
 - Live JSON patch editor on the left, **Strudel** + **Effects** drawers on the right — all built on **CodeMirror 6** with custom Catppuccin highlighting
 - Three Catppuccin themes: **latte**, **mocha**, **sky**
 - **Beginner's guide** modal: 15 lessons with embedded interactive visualizers (knob, waveform, envelope, filter)
@@ -165,8 +171,11 @@ src/
       PatchEditor.svelte    # CodeMirror 6 JSON editor in a sliding drawer
       StrudelDrawer.svelte  # CodeMirror 6 live coding drawer
       EffectsDrawer.svelte  # Distortion / bitcrusher / chorus / delay / reverb
-      PitchModWheels.svelte # Pitch bend (sprung) + mod wheel
-      PresetCloud.svelte    # Verlet-physics preset picker
+                            # (auto-opens when an LFO rope is dragged onto its tab)
+      Wheels.svelte         # Pitch bend (sprung) + mod wheel
+      PresetCloud.svelte    # Verlet-physics preset picker, hover-preview w/ snapshot restore
+      Cable.svelte          # Verlet-rope SVG drawn while dragging an LFO source
+      dragMod.svelte.ts     # Global state for "I'm dragging an LFO onto a target"
       Guide.svelte          # 15-lesson beginner modal w/ live visualizers
       guide/                # GuideKnob, GuideWave, GuideEnvelope, GuideFilter
   routes/
@@ -179,9 +188,10 @@ src/
 - **Single source of truth.** `audio.patch` is `$state`; every UI input goes
   through a validated setter (`audio.setOsc1`, `setEnvelope`, …) that runs
   the input through Zod before mutating state or touching the audio graph.
-- **Write-source tagging.** Every setter accepts `'ui' | 'editor' | 'remote' | 'midi' | 'strudel'`.
-  Subscribers (JSON editor, websocket sync, Strudel) filter out their own
-  source tag to prevent echo loops.
+- **Write-source tagging.** Every setter accepts `'ui' | 'editor' | 'remote' | 'midi' | 'init' | 'preview'`.
+  Subscribers (JSON editor, websocket sync) filter out their own
+  source tag to prevent echo loops. `'preview'` is non-broadcast — used for
+  ephemeral writes like preset hover.
 - **Partial-update gotcha.** Zod's `.default()` triggers on _missing_ keys,
   which silently reset sibling params during partial updates. `validateSection`
   filters the parsed output back down to the originally provided keys.
@@ -207,10 +217,10 @@ pnpm dlx sv@0.15.1 create --template minimal --types ts \
 
 Built in public, in small increments. The rough direction, loosest to firmest:
 
-- **next:** patch persistence (save your own presets to localStorage / cloud)
+- patch persistence (save your own presets to localStorage / cloud)
 - sampling (mic, file, tab capture)
 - export (WAV / MP3 / stems / MIDI)
-- granular / FM / wavetable synths
+- granular / wavetable synths
 - AI helpers (vibe → arrangement, "more space", etc.)
 - accessibility, gamepad / Pi controllers
 - guided exploration & genre templates, Synplant-style sound exploration

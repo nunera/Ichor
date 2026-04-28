@@ -101,6 +101,7 @@
 	<div class="flex shrink-0 items-center gap-2" class:opacity-50={!lfo.enabled}>
 		<Knob
 			label="rate"
+			target={`${which}.rate`}
 			value={lfo.rate}
 			min={0.05}
 			max={20}
@@ -125,29 +126,24 @@
 	{#if lfo.routes.length > 0}
 		<div class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
 			{#each lfo.routes as r (r.target)}
-				{@const t = modTargets.get(r.target)}
-				{@const range = t ? t.max - t.min : 1}
-				<div class="flex items-center gap-1 rounded bg-base/50 px-1.5 py-1">
+				<div class="flex items-center gap-1.5 rounded bg-base/50 px-1.5 py-1">
 					<div class="min-w-0 flex-1">
 						<div class="truncate text-[10px] text-text">{targetLabel(r.target)}</div>
-						<div class="flex items-center gap-1">
-							<label class="flex items-center gap-1 text-[9px] text-overlay1">
-								amt
-								<input
-									type="range"
-									min="0"
-									max="0.5"
-									step="0.005"
-									value={Math.abs(r.amount)}
-									oninput={(e) =>
-										audio.updateRoute(which, r.target, {
-											amount: e.currentTarget.valueAsNumber * Math.sign(r.amount || 1)
-										})}
-									class="w-16 accent-yellow"
-								/>
-							</label>
-						</div>
 					</div>
+					<Knob
+						label="amt"
+						target={`${which}.route.${r.target}.amount`}
+						value={Math.abs(r.amount)}
+						min={0}
+						max={0.5}
+						step={0.005}
+						size={22}
+						format={(v) => `${Math.round(v * 200)}%`}
+						onchange={(v) =>
+							audio.updateRoute(which, r.target, {
+								amount: v * Math.sign(r.amount || 1)
+							})}
+					/>
 					<button
 						onclick={() => audio.removeRoute(which, r.target)}
 						class="rounded p-0.5 text-overlay1 transition-colors hover:bg-surface0 hover:text-red"

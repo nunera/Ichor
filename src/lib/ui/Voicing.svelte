@@ -55,6 +55,7 @@
 	>
 		<Knob
 			label=""
+			target="voicing.glide"
 			value={v.glide}
 			min={0}
 			max={2}

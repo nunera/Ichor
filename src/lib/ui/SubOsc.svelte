@@ -56,6 +56,7 @@
 		/>
 		<Knob
 			label="level"
+			target="sub.level"
 			value={s.level}
 			min={-60}
 			max={0}
@@ -66,6 +67,7 @@
 		/>
 		<Knob
 			label="pan"
+			target="sub.pan"
 			value={s.pan}
 			min={-1}
 			max={1}

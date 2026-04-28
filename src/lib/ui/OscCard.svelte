@@ -127,6 +127,7 @@
 			/>
 			<Knob
 				label="level"
+				target="{which}.level"
 				value={osc.level}
 				min={-40}
 				max={6}
@@ -149,6 +150,7 @@
 		<div class="flex shrink-0 items-end justify-around gap-1">
 			<Knob
 				label="fine"
+				target="{which}.fine"
 				value={osc.fine}
 				min={-50}
 				max={50}
@@ -160,6 +162,7 @@
 			<div class:opacity-30={osc.unison <= 1 || osc.type === 'pulse'}>
 				<Knob
 					label="spread"
+					target="{which}.spread"
 					value={osc.spread}
 					min={0}
 					max={200}
@@ -172,6 +175,7 @@
 			<div class:opacity-30={osc.type !== 'pulse'}>
 				<Knob
 					label="width"
+					target="{which}.width"
 					value={osc.width}
 					min={0}
 					max={1}
@@ -207,6 +211,7 @@
 			/>
 			<Knob
 				label="level"
+				target="{which}.level"
 				value={osc.level}
 				min={-40}
 				max={6}
@@ -217,6 +222,7 @@
 			/>
 			<Knob
 				label="fine"
+				target="{which}.fine"
 				value={osc.fine}
 				min={-50}
 				max={50}
@@ -229,6 +235,7 @@
 		<div class="flex shrink-0 items-end justify-around gap-1">
 			<Knob
 				label="harm"
+				target="{which}.harmonicity"
 				value={osc.harmonicity}
 				min={0.1}
 				max={20}
@@ -241,6 +248,7 @@
 			{#if isFM}
 				<Knob
 					label="index"
+					target="{which}.modIndex"
 					value={osc.modIndex}
 					min={0}
 					max={50}
@@ -277,6 +285,7 @@
 			/>
 			<Knob
 				label="level"
+				target="{which}.level"
 				value={osc.level}
 				min={-40}
 				max={6}
@@ -287,6 +296,7 @@
 			/>
 			<Knob
 				label="fine"
+				target="{which}.fine"
 				value={osc.fine}
 				min={-50}
 				max={50}
@@ -299,6 +309,7 @@
 		<div class="flex shrink-0 items-end justify-around gap-1">
 			<Knob
 				label="pluck"
+				target="{which}.pluckAttack"
 				value={osc.pluckAttack}
 				min={0}
 				max={1}
@@ -309,6 +320,7 @@
 			/>
 			<Knob
 				label="damp"
+				target="{which}.pluckDamp"
 				value={osc.pluckDamp}
 				min={500}
 				max={7000}
@@ -321,6 +333,7 @@
 			/>
 			<Knob
 				label="reso"
+				target="{which}.pluckResonance"
 				value={osc.pluckResonance}
 				min={0}
 				max={0.99}

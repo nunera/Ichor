@@ -516,10 +516,41 @@ class AudioEngine {
 		}
 	}
 
+	/**
+	 * Tone.PolySynth.set({ oscillator: { type } }) only updates *future* voice
+	 * options — already-allocated voice instances keep their original waveform
+	 * until disposed. Since the sub usually re-uses one voice for its low
+	 * monophonic note, the waveform never changed. Mirror what
+	 * #rebuildOscSynth does for osc1/2: tear down and reconnect.
+	 */
+	#rebuildSubSynth() {
+		if (!this.#subGain) return;
+		const oldPoly = this.#sub;
+		const oldMono = this.#subMono;
+		try {
+			oldPoly?.releaseAll();
+		} catch {
+			/* may throw if disposed */
+		}
+		oldPoly?.dispose();
+		try {
+			oldMono?.triggerRelease();
+		} catch {
+			/* */
+		}
+		oldMono?.dispose();
+		this.#sub = new Tone.PolySynth(Tone.Synth).connect(this.#subGain);
+		this.#subMono = new Tone.Synth().connect(this.#subGain);
+		// Re-apply current settings (oscillator type, detune, envelope).
+		this.#applyOscSettings();
+		this.#applyEnvelope();
+	}
+
 	#applySub(p: Partial<SubOsc>) {
 		const s = this.patch.sub;
 		if (p.type !== undefined) {
-			this.#sub?.set({ oscillator: { type: s.type } as any });
+			// Rebuild rather than .set() — see #rebuildSubSynth comment.
+			this.#rebuildSubSynth();
 		}
 		if (p.octave !== undefined) {
 			this.#sub?.set({ detune: s.octave * 1200 });
@@ -695,6 +726,7 @@ class AudioEngine {
 
 	private setLFO1Routes(which: 'lfo1' | 'lfo2', routes: ModRoute[], source: WriteSource) {
 		this.patch[which].routes = routes;
+		this.#syncRouteAmtTargets();
 		this.#emit({ source, section: which, value: { routes } });
 	}
 
@@ -852,6 +884,7 @@ class AudioEngine {
 			this.#emit({ source, section: 'all', value: next });
 			return;
 		}
+		this.#syncRouteAmtTargets();
 
 		this.#applyOscSettings();
 		this.#applyEnvelope();
@@ -1065,12 +1098,31 @@ class AudioEngine {
 	/* ----------------------------------------------------------------------- */
 
 	#registerModTargets() {
-		const setOsc = (which: 'osc1' | 'osc2', field: 'fine' | 'level' | 'pan' | 'width') => {
+		const setOsc = (
+			which: 'osc1' | 'osc2',
+			field:
+				| 'fine'
+				| 'level'
+				| 'pan'
+				| 'width'
+				| 'spread'
+				| 'harmonicity'
+				| 'modIndex'
+				| 'pluckAttack'
+				| 'pluckDamp'
+				| 'pluckResonance'
+		) => {
 			const schemaRanges: Record<string, [number, number]> = {
 				fine: [-50, 50],
 				level: [-60, 12],
 				pan: [-1, 1],
-				width: [0, 1]
+				width: [0, 1],
+				spread: [0, 200],
+				harmonicity: [0.1, 20],
+				modIndex: [0, 50],
+				pluckAttack: [0, 1],
+				pluckDamp: [500, 7000],
+				pluckResonance: [0, 0.99]
 			};
 			const [min, max] = schemaRanges[field];
 			modTargets.register({
@@ -1101,6 +1153,28 @@ class AudioEngine {
 							const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
 							synth?.set({ oscillator: { type: 'pulse', width: v } } as any);
 						}
+					} else if (field === 'spread') {
+						const osc = this.patch[which];
+						if (osc.unison > 1 && osc.type !== 'pulse') {
+							const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+							synth?.set({ oscillator: { spread: v } } as any);
+						}
+					} else if (field === 'harmonicity') {
+						const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+						synth?.set({ harmonicity: v } as any);
+					} else if (field === 'modIndex') {
+						const synth = which === 'osc1' ? this.#osc1 : this.#osc2;
+						synth?.set({ modulationIndex: v } as any);
+					} else if (
+						field === 'pluckAttack' ||
+						field === 'pluckDamp' ||
+						field === 'pluckResonance'
+					) {
+						// Pluck params take effect on next attack via #triggerPluckVoice
+						// which reads from patch state — modulation here is a no-op for
+						// in-flight notes but will affect the next pluck.
+						// (We can't .set on the per-note PluckSynth voices here without
+						// tracking them, and rebuilding mid-ring would cut audio.)
 					}
 				}
 			});
@@ -1109,9 +1183,21 @@ class AudioEngine {
 		setOsc('osc1', 'fine');
 		setOsc('osc1', 'level');
 		setOsc('osc1', 'width');
+		setOsc('osc1', 'spread');
+		setOsc('osc1', 'harmonicity');
+		setOsc('osc1', 'modIndex');
+		setOsc('osc1', 'pluckAttack');
+		setOsc('osc1', 'pluckDamp');
+		setOsc('osc1', 'pluckResonance');
 		setOsc('osc2', 'fine');
 		setOsc('osc2', 'level');
 		setOsc('osc2', 'width');
+		setOsc('osc2', 'spread');
+		setOsc('osc2', 'harmonicity');
+		setOsc('osc2', 'modIndex');
+		setOsc('osc2', 'pluckAttack');
+		setOsc('osc2', 'pluckDamp');
+		setOsc('osc2', 'pluckResonance');
 
 		modTargets.register({
 			id: 'filter.cutoff',
@@ -1302,6 +1388,163 @@ class AudioEngine {
 				if (this.patch.effects.reverb.enabled) this.#fxReverb?.wet.rampTo(v, 0.01);
 			}
 		});
+		modTargets.register({
+			id: 'reverb.decay',
+			label: 'decay',
+			group: 'reverb',
+			min: 0.1,
+			max: 20,
+			curve: 2,
+			getBase: () => this.patch.effects.reverb.decay,
+			apply: (v) => {
+				// Reverb decay requires re-rendering the IR — too expensive per-frame.
+				// We just store the modulated value; the next setReverb({decay}) will
+				// apply it. Users wanting audible decay-mod should keep mods small
+				// and rely on the visual feedback.
+				if (this.#fxReverb) this.#fxReverb.decay = v;
+			}
+		});
+		modTargets.register({
+			id: 'bitcrusher.bits',
+			label: 'bits',
+			group: 'bitcrusher',
+			min: 1,
+			max: 16,
+			getBase: () => this.patch.effects.bitcrusher.bits,
+			apply: (v) => {
+				if (this.#fxBitCrusher) this.#fxBitCrusher.bits.value = Math.round(v);
+			}
+		});
+		modTargets.register({
+			id: 'bitcrusher.drive',
+			label: 'drive',
+			group: 'bitcrusher',
+			min: 0,
+			max: 2,
+			getBase: () => this.patch.effects.bitcrusher.drive,
+			apply: (v) => {
+				if (this.patch.effects.bitcrusher.enabled) this.#fxBitDrive?.gain.rampTo(v, 0.01);
+			}
+		});
+		modTargets.register({
+			id: 'chorus.spread',
+			label: 'spread',
+			group: 'chorus',
+			min: 0,
+			max: 180,
+			getBase: () => this.patch.effects.chorus.spread,
+			apply: (v) => {
+				if (this.#fxChorus) this.#fxChorus.spread = v;
+			}
+		});
+
+		// Sub osc detune via fine-tune-like field. Sub doesn't have its own
+		// `fine` patch field, so we only expose level + pan (already above).
+
+		// Voicing glide.
+		modTargets.register({
+			id: 'voicing.glide',
+			label: 'glide',
+			group: 'voicing',
+			min: 0,
+			max: 2,
+			curve: 2,
+			getBase: () => this.patch.voicing.glide,
+			apply: (v) => {
+				const m = this.patch.voicing.mode;
+				const needsGlide = m === 'legato' || m === 'porta' || m === 'scale';
+				if (needsGlide) this.#applyPortamento(v);
+			}
+		});
+
+		// Envelope ADSR + hold.
+		const envFields = ['attack', 'hold', 'decay', 'sustain', 'release'] as const;
+		const envRanges: Record<string, [number, number]> = {
+			attack: [0.001, 10],
+			hold: [0, 10],
+			decay: [0.001, 10],
+			sustain: [0, 1],
+			release: [0.001, 10]
+		};
+		for (const f of envFields) {
+			const [mn, mx] = envRanges[f];
+			modTargets.register({
+				id: `env.${f}`,
+				label: f,
+				group: 'env',
+				min: mn,
+				max: mx,
+				curve: f === 'sustain' ? 1 : 2,
+				getBase: () => this.patch.env[f],
+				apply: () => {
+					// Envelope shape only matters at note attack; per-frame mod has
+					// no audible effect on already-playing notes. We accept this and
+					// the next attack will read from patch state.
+				}
+			});
+		}
+
+		// Filter env amount (currently no patch field for filter envelope amount,
+		// but we expose filter.cutoff already which is the most useful).
+
+		// LFO self-modulation: rate and depth. depth here means "per-route amount
+		// scale" — we expose it as a pseudo-knob 0..1 multiplied into routes.
+		// For simplicity we mod *rate* directly; route amounts are individually
+		// modulatable via the per-route knobs registered dynamically.
+		for (const w of ['lfo1', 'lfo2'] as const) {
+			modTargets.register({
+				id: `${w}.rate`,
+				label: 'rate',
+				group: w,
+				min: 0.05,
+				max: 20,
+				curve: 2,
+				getBase: () => this.patch[w].rate,
+				apply: () => {
+					/* read live in #modTick via patch state — handled there */
+				}
+			});
+		}
+	}
+
+	/**
+	 * Register/unregister mod-targets for individual route amounts so they
+	 * become modulatable by other LFOs. Called whenever routes change.
+	 *
+	 * Target id format: 'lfo1.route.{target}.amount'. We key by target rather
+	 * than index so routes survive reordering.
+	 */
+	#routeAmtUnregs = new Map<string, () => void>();
+	#syncRouteAmtTargets() {
+		const desired = new Set<string>();
+		for (const w of ['lfo1', 'lfo2'] as const) {
+			for (const r of this.patch[w].routes) {
+				const id = `${w}.route.${r.target}.amount`;
+				desired.add(id);
+				if (this.#routeAmtUnregs.has(id)) continue;
+				const unreg = modTargets.register({
+					id,
+					label: `${r.target} amt`,
+					group: w,
+					min: 0,
+					max: 0.5,
+					getBase: () => {
+						const route = this.patch[w].routes.find((rr) => rr.target === r.target);
+						return route ? Math.abs(route.amount) : 0;
+					},
+					apply: () => {
+						/* read live in #modTick */
+					}
+				});
+				this.#routeAmtUnregs.set(id, unreg);
+			}
+		}
+		for (const [id, unreg] of this.#routeAmtUnregs) {
+			if (!desired.has(id)) {
+				unreg();
+				this.#routeAmtUnregs.delete(id);
+			}
+		}
 	}
 
 	#startModLoop() {
@@ -1338,32 +1581,56 @@ class AudioEngine {
 		const dt = (now - this.#lastModTime) / 1000; // seconds
 		this.#lastModTime = now;
 
-		// Advance phase
+		// Mod wheel boost: scales every active route by 1 + mod*1.0 (so at full
+		// wheel routings sound twice as wide, doubling their swing).
+		const wheelBoost = 1 + this.#modulation;
+
+		// First pass — figure out the *effective* (modulated) rate of each LFO
+		// from contributions to lfoN.rate routes. This is one frame behind, but
+		// inaudible.
+		const liveRate = (w: 'lfo1' | 'lfo2'): number => {
+			let base = this.patch[w].rate;
+			const id = `${w}.rate`;
+			const v = liveMod.get(id);
+			if (typeof v === 'number') base = v;
+			return Math.max(0.01, base);
+		};
+		// Advance phase using live-modulated rate.
 		if (this.patch.lfo1.enabled) {
-			this.#lfo1Phase = (this.#lfo1Phase + this.patch.lfo1.rate * dt) % 1;
+			this.#lfo1Phase = (this.#lfo1Phase + liveRate('lfo1') * dt) % 1;
 		}
 		if (this.patch.lfo2.enabled) {
-			this.#lfo2Phase = (this.#lfo2Phase + this.patch.lfo2.rate * dt) % 1;
+			this.#lfo2Phase = (this.#lfo2Phase + liveRate('lfo2') * dt) % 1;
 		}
 
 		const v1 = this.patch.lfo1.enabled ? this.#waveAt(this.#lfo1Phase, this.patch.lfo1.shape) : 0;
 		const v2 = this.patch.lfo2.enabled ? this.#waveAt(this.#lfo2Phase, this.patch.lfo2.shape) : 0;
 
-		// Mod wheel boost: scales every active route by 1 + mod*1.0 (so at full
-		// wheel routings sound twice as wide, doubling their swing).
-		const wheelBoost = 1 + this.#modulation;
+		// Resolve per-route effective amount (one-frame lag ok). The route-amt
+		// target id is 'lfoN.route.{target}.amount'.
+		const resolveAmt = (w: 'lfo1' | 'lfo2', r: ModRoute): number => {
+			const id = `${w}.route.${r.target}.amount`;
+			const live = liveMod.get(id);
+			const sign = Math.sign(r.amount || 1);
+			return (typeof live === 'number' ? live : Math.abs(r.amount)) * sign;
+		};
 
 		const contributions = new Map<string, number>();
-		const accumulate = (routes: ModRoute[], lfoVal: number, enabled: boolean) => {
+		const accumulate = (
+			w: 'lfo1' | 'lfo2',
+			routes: ModRoute[],
+			lfoVal: number,
+			enabled: boolean
+		) => {
 			if (!enabled) return;
 			for (const r of routes) {
 				const existing = contributions.get(r.target) || 0;
-				const add = r.amount * lfoVal * wheelBoost;
+				const add = resolveAmt(w, r) * lfoVal * wheelBoost;
 				contributions.set(r.target, existing + add);
 			}
 		};
-		accumulate(this.patch.lfo1.routes, v1, this.patch.lfo1.enabled);
-		accumulate(this.patch.lfo2.routes, v2, this.patch.lfo2.enabled);
+		accumulate('lfo1', this.patch.lfo1.routes, v1, this.patch.lfo1.enabled);
+		accumulate('lfo2', this.patch.lfo2.routes, v2, this.patch.lfo2.enabled);
 
 		for (const [id, amount] of contributions) {
 			const t = modTargets.get(id);

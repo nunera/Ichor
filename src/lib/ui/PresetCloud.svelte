@@ -29,9 +29,17 @@
 	let bounds = { w: 600, h: 400 };
 	let raf = 0;
 	let previewTimer = 0;
+	// Snapshot of the patch when hover-preview begins, so leaving without a
+	// click restores the user's working patch.
+	let previewSnapshot: unknown = null;
 
 	function preview(name: string) {
 		if (!audio.started) return;
+		if (previewSnapshot === null) {
+			// Deep-clone the current patch so subsequent loadPatch calls don't
+			// mutate it.
+			previewSnapshot = structuredClone($state.snapshot(audio.patch));
+		}
 		clearTimeout(previewTimer);
 		audio.releaseAll();
 		// 'preview' source isn't broadcast over the websocket, so hovering presets
@@ -39,6 +47,18 @@
 		audio.loadPatch(presets[name].patch, 'preview');
 		audio.attack('A3');
 		previewTimer = window.setTimeout(() => audio.release('A3'), 700);
+	}
+
+	function restoreSnapshot() {
+		if (previewSnapshot !== null && audio.started) {
+			audio.loadPatch(previewSnapshot, 'preview');
+		}
+		previewSnapshot = null;
+	}
+
+	function commitPreview() {
+		// User selected — snapshot is no longer needed.
+		previewSnapshot = null;
 	}
 
 	function draw() {
@@ -274,6 +294,7 @@
 
 	function load(name: string) {
 		audio.loadPatch(presets[name].patch, 'editor');
+		commitPreview();
 	}
 
 	function getPos(e: PointerEvent) {
@@ -330,7 +351,10 @@
 	}
 
 	$effect(() => {
-		if (!active) focused = null;
+		if (!active) {
+			focused = null;
+			restoreSnapshot();
+		}
 	});
 
 	function navigate(dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown') {
@@ -422,6 +446,8 @@
 		onpointerup={onCanvasUp}
 		onpointerleave={() => {
 			hover = null;
+			// If user hasn't focused/committed, restore their working patch.
+			if (focused === null) restoreSnapshot();
 			draw();
 		}}
 	/>

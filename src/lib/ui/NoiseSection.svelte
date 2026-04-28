@@ -41,6 +41,7 @@
 	<div class="flex flex-1 items-center justify-around gap-1">
 		<Knob
 			label="level"
+			target="noise.level"
 			value={n.level}
 			min={-60}
 			max={0}
@@ -51,6 +52,7 @@
 		/>
 		<Knob
 			label="pan"
+			target="noise.pan"
 			value={n.pan}
 			min={-1}
 			max={1}
