@@ -31,8 +31,7 @@
 }
 
 /* Catppuccin Mocha (dark) */
-:root.dark,
-:root.sky {
+:root.dark {
 	--ctp-rosewater: #f5e0dc;
 	--ctp-flamingo: #f2cdcd;
 	--ctp-pink: #f5c2e7;
@@ -59,6 +58,17 @@
 	--ctp-base: #1e1e2e;
 	--ctp-mantle: #181825;
 	--ctp-crust: #11111b;
+}
+
+/* Mocha OLED: keep Mocha accents, but push backgrounds to true black. */
+:root.oled {
+	--ctp-base: #000000;
+	--ctp-mantle: #000000;
+	--ctp-crust: #000000;
+	/* Keep surfaces distinct so borders and panels remain legible. */
+	--ctp-surface0: #0b0b0f;
+	--ctp-surface1: #12121a;
+	--ctp-surface2: #1a1a25;
 }
 
 @theme inline {
@@ -107,11 +117,31 @@ body {
 	--ctp-key-black-text: #6c7086; /* mocha overlay0 */
 }
 
-/*
- * "Sky" theme: Mocha base with the primary accent (mauve) remapped to sky
- * — the same hue as the "keys" preset category. Lavender stays purple so
- * the UI keeps a secondary purple accent and doesn't go monochrome blue.
- */
-:root.sky {
-	--ctp-mauve: #89dceb; /* sky */
+/* Accent picker: remap the primary accent (mauve) on demand. */
+:root.accent-rosewater {
+	--ctp-mauve: var(--ctp-rosewater);
+}
+
+:root.accent-red {
+	--ctp-mauve: var(--ctp-red);
+}
+
+:root.accent-peach {
+	--ctp-mauve: var(--ctp-peach);
+}
+
+:root.accent-green {
+	--ctp-mauve: var(--ctp-green);
+}
+
+:root.accent-teal {
+	--ctp-mauve: var(--ctp-teal);
+}
+
+:root.accent-sky {
+	--ctp-mauve: var(--ctp-sky);
+}
+
+:root.accent-blue {
+	--ctp-mauve: var(--ctp-blue);
 }

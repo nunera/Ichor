@@ -222,7 +222,7 @@
 			cx={x5}
 			cy={yBot}
 			r="6"
-			class="cursor-ew-resize fill-sky"
+			class="cursor-ew-resize fill-mauve"
 			onpointerdown={(e) => onDown('R', e)}
 		/>
 

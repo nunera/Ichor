@@ -156,7 +156,12 @@
 		}
 
 		// Jittered grid — keep only points inside the star.
-		const spacing = 15;
+		// IMPORTANT: spacing must adapt to available area. When the panel is
+		// small (common at high zoom), a fixed spacing can produce fewer
+		// candidates than presets, causing many nodes to share targets which
+		// makes the physics explode.
+		const approxStarArea = Math.PI * R_outer * R_outer * 0.6;
+		const spacing = Math.max(4, Math.min(16, Math.sqrt(approxStarArea / (N * 1.35))));
 		const jitter = spacing * 0.5;
 		const candidates: [number, number][] = [];
 		for (let gy = cy - R_outer; gy <= cy + R_outer; gy += spacing) {
@@ -165,6 +170,15 @@
 				const py = gy + (Math.random() - 0.5) * jitter;
 				if (inStar(px, py)) candidates.push([px, py]);
 			}
+		}
+
+		// If the panel is tiny we may still not have enough points. Top up via
+		// rejection-sampling inside the star so every preset can get a distinct
+		// target.
+		while (candidates.length < N) {
+			const px = cx + (Math.random() * 2 - 1) * R_outer;
+			const py = cy + (Math.random() * 2 - 1) * R_outer;
+			if (inStar(px, py)) candidates.push([px, py]);
 		}
 
 		// Sort by angle so same-category dots cluster in the same wedge of the star.
@@ -182,11 +196,18 @@
 			presets[a].category.localeCompare(presets[b].category)
 		);
 
+		// Keep the sim scale proportional to panel size.
+		// Key idea: these are in *CSS px*, so when the panel becomes smaller
+		// (e.g. zoomed in), we shrink radii too to avoid over-constraining.
+		nodeR = Math.max(3, Math.min(6, Math.round(Math.min(bounds.w, bounds.h) / 180)));
+		REPEL_R = nodeR * 3.5;
+		CELL = Math.max(24, Math.ceil(REPEL_R * 1.6));
+
 		nodes = sorted.map((name, i) => {
 			const [tx, ty] = targets[i];
 			const x = cx + (Math.random() - 0.5) * R_outer * 0.4;
 			const y = cy + (Math.random() - 0.5) * R_outer * 0.4;
-			return { name, category: presets[name].category, x, y, vx: 0, vy: 0, r: 4, tx, ty };
+			return { name, category: presets[name].category, x, y, vx: 0, vy: 0, r: nodeR, tx, ty };
 		});
 
 		edges = [];
@@ -201,10 +222,15 @@
 	// At 300+ nodes the all-pairs check becomes the frame bottleneck. By
 	// bucketing nodes into a coarse grid and only repelling against cells
 	// in our 3×3 neighborhood, we keep physics smooth at hundreds of nodes.
-	const CELL = 24; // px; ~ 2× node radius — bigger = fewer buckets but more pairs per bucket
+	let CELL = 24; // px; ~ 2× node radius — bigger = fewer buckets but more pairs per bucket
+	let REPEL_R = 14; // px — repulsion radius (must be < CELL)
+	let nodeR = 4;
 	const grid = new Map<number, number[]>();
 	function cellKey(x: number, y: number): number {
 		return ((Math.floor(x / CELL) | 0) << 16) ^ (Math.floor(y / CELL) | 0);
+	}
+	function gridKey(cx: number, cy: number): number {
+		return ((cx | 0) << 16) ^ (cy | 0);
 	}
 	function rebuildGrid() {
 		grid.clear();
@@ -219,76 +245,88 @@
 		}
 	}
 
-	function step() {
-		raf = requestAnimationFrame(step);
-		if (!active) return;
-
-		const TARGET_K = 0.06;
-		const DAMP = 0.85;
-		const REPEL = 28; // strength per overlap (lower = looser pack)
-		const REPEL_R = 14; // px — repulsion radius (must be < CELL)
+	function tick(): number {
+		// Pure position relaxation: looks less "floaty/fake" than velocity springs
+		// and converges cleanly without orbital rotation.
+		const TARGET_PULL = 0.14; // ease-to-target per frame (0..1)
+		const REPEL_POS = 0.6; // positional separation (0..1)
+		const ITERS = 2;
 		const REPEL_R2 = REPEL_R * REPEL_R;
+		let maxMove = 0;
 
-		// 1. Spring back to assigned star slot
+		// 1. Ease back to assigned star slot
 		for (let i = 0; i < nodes.length; i++) {
 			if (i === dragging) continue;
 			const n = nodes[i];
-			n.vx += (n.tx - n.x) * TARGET_K;
-			n.vy += (n.ty - n.y) * TARGET_K;
+			const dx = n.tx - n.x;
+			const dy = n.ty - n.y;
+			const mx = dx * TARGET_PULL;
+			const my = dy * TARGET_PULL;
+			n.x += mx;
+			n.y += my;
+			maxMove = Math.max(maxMove, Math.abs(mx), Math.abs(my));
 		}
 
-		// 2. Pairwise repulsion via spatial hash (3×3 cell neighborhood)
-		rebuildGrid();
-		for (let i = 0; i < nodes.length; i++) {
-			const a = nodes[i];
-			const cx = Math.floor(a.x / CELL) | 0;
-			const cy = Math.floor(a.y / CELL) | 0;
-			for (let oy = -1; oy <= 1; oy++) {
-				for (let ox = -1; ox <= 1; ox++) {
-					const bucket = grid.get(((cx + ox) << 16) ^ (cy + oy));
-					if (!bucket) continue;
-					for (const j of bucket) {
-						if (j <= i) continue; // each pair handled once
-						const b = nodes[j];
-						const dx = a.x - b.x;
-						const dy = a.y - b.y;
-						const d2 = dx * dx + dy * dy;
-						if (d2 >= REPEL_R2 || d2 === 0) continue;
-						const d = Math.sqrt(d2);
-						const force = ((REPEL_R - d) / d) * REPEL * 0.04;
-						const fx = dx * force;
-						const fy = dy * force;
-						a.vx += fx;
-						a.vy += fy;
-						b.vx -= fx;
-						b.vy -= fy;
+		// 2. Overlap relaxation iterations
+		for (let iter = 0; iter < ITERS; iter++) {
+			rebuildGrid();
+			for (let i = 0; i < nodes.length; i++) {
+				const a = nodes[i];
+				const cx = Math.floor(a.x / CELL) | 0;
+				const cy = Math.floor(a.y / CELL) | 0;
+				for (let oy = -1; oy <= 1; oy++) {
+					for (let ox = -1; ox <= 1; ox++) {
+						const bucket = grid.get(gridKey(cx + ox, cy + oy));
+						if (!bucket) continue;
+						for (const j of bucket) {
+							if (j <= i) continue;
+							const b = nodes[j];
+							const dx = a.x - b.x;
+							const dy = a.y - b.y;
+							const d2 = dx * dx + dy * dy;
+							if (d2 >= REPEL_R2 || d2 === 0) continue;
+							const d = Math.sqrt(d2);
+							const overlap = REPEL_R - d;
+							const nx = dx / d;
+							const ny = dy / d;
+							const push = overlap * REPEL_POS;
+							maxMove = Math.max(maxMove, push);
+							if (i === dragging) {
+								b.x -= nx * push;
+								b.y -= ny * push;
+							} else if (j === dragging) {
+								a.x += nx * push;
+								a.y += ny * push;
+							} else {
+								const half = push * 0.5;
+								a.x += nx * half;
+								a.y += ny * half;
+								b.x -= nx * half;
+								b.y -= ny * half;
+							}
+						}
 					}
 				}
 			}
 		}
 
-		// 3. Integrate + damping
-		for (let i = 0; i < nodes.length; i++) {
-			if (i === dragging) continue;
-			const n = nodes[i];
-			n.vx *= DAMP;
-			n.vy *= DAMP;
-			n.x += n.vx;
-			n.y += n.vy;
+		// Keep velocities from accumulating (drag sets them to 0 anyway).
+		for (const n of nodes) {
+			n.vx = 0;
+			n.vy = 0;
 		}
 
-		draw();
+		return maxMove;
+	}
 
-		if (dragging === null) {
-			let maxV = 0;
-			for (const n of nodes) {
-				const v2 = n.vx * n.vx + n.vy * n.vy;
-				if (v2 > maxV) maxV = v2;
-			}
-			if (maxV < 0.04) {
-				cancelAnimationFrame(raf);
-				raf = 0;
-			}
+	function step() {
+		raf = requestAnimationFrame(step);
+		if (!active) return;
+		const moved = tick();
+		draw();
+		if (dragging === null && moved < 0.05) {
+			cancelAnimationFrame(raf);
+			raf = 0;
 		}
 	}
 

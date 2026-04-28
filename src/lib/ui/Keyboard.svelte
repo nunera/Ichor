@@ -2,7 +2,7 @@
 	import { audio } from '$lib/audio/engine.svelte';
 	import { arp } from '$lib/audio/arp.svelte';
 	import { keyboardState } from './keyboard.svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	type Props = { octaves?: number };
 	let { octaves = 2 }: Props = $props();
@@ -62,7 +62,7 @@
 
 	// Visual highlights and per-pointer note tracking for glissando.
 	const held = new SvelteSet<string>();
-	const pointerNote = new Map<number, string>();
+	const pointerNote = new SvelteMap<number, string>();
 
 	function press(note: string) {
 		held.add(note);
@@ -169,18 +169,11 @@
 	onvisibilitychange={onVisibility}
 />
 
-<div class="flex flex-col gap-2">
-	<div class="flex items-center gap-2" style="font-size: 10px; color: rgba(255,255,255,0.3);">
-		<button class="kbd-btn" onclick={() => shift(-1)} aria-label="octave down">−</button>
-		<span style="font-family: 'Fira Code', ui-monospace, monospace; color: rgba(255,255,255,0.5);">
-			C{octaveBase} – B{octaveBase + octaves - 1}
-		</span>
-		<button class="kbd-btn" onclick={() => shift(+1)} aria-label="octave up">+</button>
-		<span class="ml-2" style="letter-spacing: 1px;"> z / x to shift </span>
-	</div>
-
+<div class="flex h-full w-full flex-col">
 	<div
-		class="relative flex h-full w-full touch-none select-none"
+		class="relative flex min-h-0 w-full flex-1 touch-none overflow-hidden rounded-md select-none"
+		role="group"
+		aria-label="keyboard"
 		onpointerdown={onPointerDown}
 		onpointermove={onPointerMove}
 		onpointerup={onPointerUp}
@@ -191,13 +184,15 @@
 			<div
 				data-note={k.note}
 				class="key-natural relative flex flex-1 flex-col justify-end rounded-b-md pb-3 text-center text-[10px]"
-				class:active={active}
+				class:active
 			>
 				{#if k.note.startsWith('C')}
-					<div class="font-semibold">{k.note}</div>
+					<div class="text-[11px] font-semibold text-text/80">{k.note}</div>
 				{/if}
 				{#if k.key}
-					<div class="opacity-60">{k.key}</div>
+					<div class="mt-0.5 font-mono text-[12px] font-semibold tracking-wide text-text/70">
+						{k.key}
+					</div>
 				{/if}
 			</div>
 		{/each}
@@ -208,16 +203,13 @@
 			{@const widthPct = (1 / totalWhites) * 0.6 * 100}
 			<div
 				data-note={k.note}
-				class="absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md border border-key-black pb-2 text-center text-[9px] shadow-lg transition-colors"
-				class:bg-key-black={!active}
-				class:text-key-black-text={!active}
-				class:bg-lavender={active}
-				class:text-key-black={active}
+				class="key-accidental absolute top-0 flex h-2/3 -translate-x-1/2 flex-col justify-end rounded-b-md pb-2 text-center text-[9px] shadow-lg transition-colors"
+				class:active
 				style:left="{leftPct}%"
 				style:width="{widthPct}%"
 			>
 				{#if k.key}
-					<div>{k.key}</div>
+					<div class="font-mono text-[11px] font-semibold tracking-wide">{k.key}</div>
 				{/if}
 			</div>
 		{/each}
@@ -225,33 +217,13 @@
 </div>
 
 <style>
-	/* Octave shift buttons */
-	.kbd-btn {
-		background: linear-gradient(180deg, #2a2a32 0%, #1e1e24 100%);
-		box-shadow:
-			inset 0 1px 1px rgba(255, 255, 255, 0.07),
-			0 2px 3px rgba(0, 0, 0, 0.5);
-		border: 1px solid rgba(0, 0, 0, 0.5);
-		border-radius: 4px;
-		padding: 2px 8px;
-		color: rgba(255, 255, 255, 0.5);
-		font-size: 12px;
-		cursor: pointer;
-		transition: background 0.08s;
-	}
-
-	.kbd-btn:hover {
-		background: linear-gradient(180deg, #33333b 0%, #26262c 100%);
-		color: rgba(255, 255, 255, 0.8);
-	}
-
 	/* Natural (formerly white) keys — stealth matte dark */
 	.key-natural {
-		background: linear-gradient(180deg, #2a2a30 0%, #1e1e24 100%);
-		box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
-		border-right: 1px solid rgba(0, 0, 0, 0.6);
-		border-bottom: 1px solid rgba(0, 0, 0, 0.4);
-		color: rgba(255, 255, 255, 0.25);
+		background: linear-gradient(180deg, var(--ctp-surface1) 0%, var(--ctp-surface0) 100%);
+		box-shadow: inset 0 1px 1px color-mix(in srgb, var(--ctp-text) 8%, transparent);
+		border-right: 1px solid color-mix(in srgb, var(--ctp-crust) 45%, var(--ctp-surface0));
+		border-bottom: 1px solid color-mix(in srgb, var(--ctp-crust) 35%, var(--ctp-surface0));
+		color: var(--ctp-overlay1);
 		transition:
 			box-shadow 0.05s,
 			border-color 0.05s,
@@ -259,32 +231,34 @@
 	}
 
 	.key-natural.active {
-		border-bottom: 2px solid #a855f7;
+		border-bottom: 2px solid var(--ctp-mauve);
 		box-shadow:
-			inset 0 1px 1px rgba(255, 255, 255, 0.05),
-			inset 0 -15px 25px rgba(168, 85, 247, 0.25);
-		color: rgba(255, 255, 255, 0.7);
+			inset 0 1px 1px color-mix(in srgb, var(--ctp-text) 10%, transparent),
+			inset 0 -15px 25px color-mix(in srgb, var(--ctp-mauve) 25%, transparent);
+		color: var(--ctp-text);
 	}
 
-	/* Accidental (formerly black) keys — matte carbon black */
+	/* Accidental keys — match natural styling but stay black */
 	.key-accidental {
-		background: linear-gradient(180deg, #111114 0%, #050505 100%);
+		background: linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--ctp-key-black) 92%, var(--ctp-surface0) 8%) 0%,
+			var(--ctp-key-black) 100%
+		);
 		box-shadow:
-			0 5px 12px rgba(0, 0, 0, 0.9),
-			inset 0 1px 1px rgba(255, 255, 255, 0.02);
-		color: rgba(255, 255, 255, 0.15);
+			inset 0 1px 1px color-mix(in srgb, var(--ctp-text) 6%, transparent),
+			0 6px 14px color-mix(in srgb, var(--ctp-crust) 90%, transparent);
+		border: 1px solid color-mix(in srgb, var(--ctp-crust) 85%, var(--ctp-key-black));
+		color: var(--ctp-key-black-text);
 		z-index: 10;
-		transition:
-			box-shadow 0.05s,
-			border-color 0.05s,
-			color 0.05s;
 	}
 
 	.key-accidental.active {
-		border-bottom: 2px solid #a855f7;
+		border-bottom: 2px solid var(--ctp-mauve);
 		box-shadow:
-			0 5px 12px rgba(0, 0, 0, 0.9),
-			inset 0 -15px 25px rgba(168, 85, 247, 0.25);
-		color: rgba(255, 255, 255, 0.6);
+			inset 0 1px 1px color-mix(in srgb, var(--ctp-text) 8%, transparent),
+			inset 0 -15px 25px color-mix(in srgb, var(--ctp-mauve) 18%, transparent),
+			0 6px 14px color-mix(in srgb, var(--ctp-crust) 90%, transparent);
+		color: var(--ctp-text);
 	}
 </style>
