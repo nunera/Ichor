@@ -1,11 +1,19 @@
 @import 'tailwindcss';
 
+/* Register so `--ctp-mauve` can interpolate as a color (rainbow mode). */
+@property --ctp-mauve {
+	syntax: '<color>';
+	inherits: true;
+	initial-value: #8839ef;
+}
+
 /* Catppuccin Latte (light) — default */
 :root {
 	--ctp-rosewater: #dc8a78;
 	--ctp-flamingo: #dd7878;
 	--ctp-pink: #ea76cb;
-	--ctp-mauve: #8839ef;
+	--ctp-mauve-palette: #8839ef;
+	--ctp-mauve: var(--ctp-mauve-palette);
 	--ctp-red: #d20f39;
 	--ctp-maroon: #e64553;
 	--ctp-peach: #fe640b;
@@ -35,7 +43,8 @@
 	--ctp-rosewater: #f5e0dc;
 	--ctp-flamingo: #f2cdcd;
 	--ctp-pink: #f5c2e7;
-	--ctp-mauve: #cba6f7;
+	--ctp-mauve-palette: #cba6f7;
+	--ctp-mauve: var(--ctp-mauve-palette);
 	--ctp-red: #f38ba8;
 	--ctp-maroon: #eba0ac;
 	--ctp-peach: #fab387;
@@ -144,4 +153,9 @@ body {
 
 :root.accent-blue {
 	--ctp-mauve: var(--ctp-blue);
+}
+
+/* Super secret rainbow mode: `ThemeToggle.svelte` animates `--ctp-mauve` in JS. */
+:root.rainbow {
+	/* marker class */
 }

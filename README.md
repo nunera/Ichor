@@ -49,23 +49,23 @@ A playable, hackable synth in the browser:
 
 ### Performance & I/O
 
-- Multi-octave keyboard (3 octaves) with mouse glissando, two rows of keybinds (`a–j` / `k–'`), `z` / `x` to shift octave
+- Multi-octave keyboard (2 octaves) with mouse glissando, two rows of keybinds (`a–j` / `k–'`), `z` / `x` to shift octave
 - **Pitch bend wheel** (±2 semitones, springs back) and **mod wheel** (scales every active LFO routing in real time)
 - **Web MIDI** input support
 
 ### UI
 
 - Live oscilloscope + spectrum analyser as the page header background
-- 300+ built-in presets in a floating, physics-based picker — **hover or arrow-key to preview** (auto-restores your working patch when you leave), click or Enter to commit
+- 400+ built-in presets in a floating, physics-based picker — **hover or arrow-key to preview** (auto-restores your working patch when you leave), click or Enter to commit
 - Live JSON patch editor on the left, **Strudel** + **Effects** drawers on the right — all built on **CodeMirror 6** with custom Catppuccin highlighting
-- Three Catppuccin themes: **latte**, **mocha**, **sky**
+- Catppuccin themes (**latte**, **catppuccin**, **catppuccin-oled**) with a snapping accent color picker
 - **Beginner's guide** modal: 15 lessons with embedded interactive visualizers (knob, waveform, envelope, filter)
 - Lucide icons throughout
 
 ### Networking & live coding
 
 - **Live multiplayer sessions** via Cloudflare Durable Objects: click "share" → get a URL → anyone who opens it edits the same patch in real time, with presence count
-- **Live coding** via a custom Strudel lookahead scheduler (bypassing broken `@kabelsalat` internals): write patterns like `note("c3 eb3 g3 bb3").s("ichor").cutoff(sine.range(0.1, 0.9))` in the side drawer; every synth + effect param is a Strudel-addressable channel.
+- **Live coding** via a custom Strudel lookahead scheduler: write patterns like `note("c3 eb3 g3 bb3").s("ichor").cutoff(sine.range(0.1, 0.9))` in the side drawer; every synth + effect param is a Strudel-addressable channel.
 
 ---
 
@@ -149,38 +149,57 @@ It's a static-friendly SvelteKit app; `pnpm preview` is enough for local-only us
 src/
   lib/
     audio/
-      patch.ts          # Zod schema, types, defaults, validators
-      engine.svelte.ts  # AudioEngine: Tone graph, validated setters,
-                        # subscribe API, write-source tagging
-      presets.ts        # Built-in presets grouped by category
+      patch.ts              # Zod schema, types, defaults, validators
+      engine.svelte.ts      # AudioEngine: Tone graph, validated setters,
+                            # subscribe API, write-source tagging
+      presets.ts            # Built-in presets grouped by category
+      arp.svelte.ts         # Arpeggiator (transparent passthrough when off)
+      midi.svelte.ts        # Web MIDI input
+      modTargets.ts         # LFO mod target registration helpers
+      session.svelte.ts     # Client-side websocket sync, coalesced per-frame
+      strudel.svelte.ts     # Custom lookahead scheduler + param routing
     server/
       PatchSession.ts       # Durable Object: holds canonical patch, fans out updates
-    audio/
-      session.svelte.ts     # Client-side websocket sync, coalesced per-frame
-    audio/
-      strudel.svelte.ts     # Custom lookahead scheduler + param routing
+      Registry.ts           # Durable Object: registry of broadcasted sessions
+      stubs/                # Local-dev DO stubs
     ui/
       Keyboard.svelte       # Multi-octave keyboard, glissando, octave shift
+      keyboard.svelte.ts    # Shared keyboard octave state
       SoundDesign.svelte    # Two-row grid: osc1 / osc2 / filter then env / lfo
       OscCard.svelte        # Per-osc swappable engine UI (BASIC/FM/AM/Pluck)
+      SubOsc.svelte         # Sub oscillator UI
+      NoiseSection.svelte   # Noise generator UI
+      Voicing.svelte        # Voice mode + glide UI
       Envelope.svelte       # Draggable AHDSR + knob row, ResizeObserver-sized SVG
+      LFOCard.svelte        # Per-LFO controls (rate, shape, routes)
       LFOWave.svelte        # Inline LFO shape preview
+      Waveform.svelte       # Static waveform preview
       Knob.svelte           # Circular knob (drag, wheel, dblclick, exponential curves)
       Visualizer.svelte     # Canvas oscilloscope + spectrum, theme-aware
-      ThemeToggle.svelte    # latte / mocha / sky picker
+      ThemeToggle.svelte    # Theme + accent color picker
       PatchEditor.svelte    # CodeMirror 6 JSON editor in a sliding drawer
       StrudelDrawer.svelte  # CodeMirror 6 live coding drawer
       EffectsDrawer.svelte  # Distortion / bitcrusher / chorus / delay / reverb
                             # (auto-opens when an LFO rope is dragged onto its tab)
+      Arp.svelte            # Arpeggiator UI
       Wheels.svelte         # Pitch bend (sprung) + mod wheel
-      PresetCloud.svelte    # Verlet-physics preset picker, hover-preview w/ snapshot restore
+      MIDIIndicator.svelte  # Web MIDI status indicator
+      PresetCloud.svelte    # Physics-relaxation preset picker, hover-preview w/ snapshot restore
       Cable.svelte          # Verlet-rope SVG drawn while dragging an LFO source
+      CursorLayer.svelte    # Multiplayer cursor overlay
+      SessionBadge.svelte   # Live-session presence badge
+      BrowseSessions.svelte # Public sessions browser modal
       dragMod.svelte.ts     # Global state for "I'm dragging an LFO onto a target"
       Guide.svelte          # 15-lesson beginner modal w/ live visualizers
       guide/                # GuideKnob, GuideWave, GuideEnvelope, GuideFilter
   routes/
     +page.svelte         # Layout: full-bleed visualizer header → controls → keys
-    layout.css           # Catppuccin tokens (latte / mocha / sky)
+    +layout.svelte       # Loads layout.css; favicon
+    layout.css           # Catppuccin tokens (latte / catppuccin / catppuccin-oled)
+    api/sessions/        # REST endpoints for the public sessions browser
+    s/[id]/+page.svelte  # Joinable session URL
+scripts/
+  inject-do.mjs          # Post-build: bundles Durable Objects into _worker.js
 ```
 
 ### Architecture notes

@@ -14,7 +14,7 @@ Read this once per session before making non-trivial changes.
 ## Commands
 
 - `pnpm dev` — Vite dev server.
-- `pnpm check` — `wrangler types --check && svelte-kit sync && svelte-check`. Run before declaring work done.
+- `pnpm check` — `wrangler types --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json`. Run before declaring work done.
 - `pnpm gen` — regenerate `worker-configuration.d.ts` from `wrangler.jsonc`. Only needed when bindings / compat date / DO migrations change.
 - `pnpm build` — full build incl. DO injection. `pnpm preview` to serve locally.
 
@@ -50,7 +50,7 @@ Read this once per session before making non-trivial changes.
 - **Svelte 5 runes only.** `$state`, `$derived`, `$props`, `$effect`. No `export let`, no `$:`, no stores, no `<svelte:component>`. Use class-based shared state with `$state` fields (see `arp.svelte.ts`, `keyboard.svelte.ts`, `dragMod.svelte.ts`).
 - **Avoid `$effect` for derived data.** Use `$derived` / `$derived.by`. Effects are for syncing to external systems only.
 - **Keyed `{#each}`** with stable keys. Never use index as key.
-- **Tailwind v4 with Catppuccin tokens** — `bg-base`, `text-text`, `text-subtext0`, `text-overlay1`, `bg-mauve`, etc. Three themes (`latte`, `mocha`, `sky`) all use the same token names; don't hard-code colors.
+- **Tailwind v4 with Catppuccin tokens** — `bg-base`, `text-text`, `text-subtext0`, `text-overlay1`, `bg-mauve`, etc. Themes (`latte`, `catppuccin`, `catppuccin-oled`) all use the same token names; don't hard-code colors. **`mauve` is the primary accent token** and is remapped at runtime by accent presets — new UI should prefer `bg-mauve` / `text-mauve` / `fill-mauve` for the primary accent rather than other palette colors.
 - **Lucide icons** for any new iconography.
 - Prettier + ESLint enforce style. Run `pnpm lint` and `pnpm check` before declaring work done.
 
