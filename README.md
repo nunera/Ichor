@@ -30,12 +30,14 @@ A playable, hackable synth in the browser:
 - **Noise generator** (white / pink / brown) with level + pan
 - AHDSR envelope with a draggable visual editor and matching knobs
 - Multi-mode filter (lowpass / highpass / bandpass / notch) with cutoff + resonance
-- **Two LFOs** with rate + shape (sine / square / triangle / saw), each routable to virtually any continuous parameter via drag-and-drop
+- **Two LFOs** with rate + shape (sine / square / triangle / saw), each routable to virtually any continuous parameter via drag-and-drop; supports bipolar amounts (−50%..+50%)
   - Drag an LFO's title onto any knob — a verlet-physics cable dangles from the title to the cursor; release on a knob to attach
-  - Modulation amount is per-route, expressed in _knob-space_ (0–50% of dial travel) so it feels consistent across exponential params like cutoff
+  - Modulation amount is per-route, expressed in _knob-space_ (−50%..+50% of dial travel) so it feels consistent across exponential params like cutoff
   - Routed knobs render a yellow arc ring sized to the modulation depth, with a live indicator dot tracking the LFO's current value
   - **Per-route `amt` is itself a knob** — drop another LFO onto it for evolving depth modulation; LFO rate is also modulatable (LFO2 → LFO1.rate gives classic FM-style sweeps)
   - Drag a rope over the **effects** tab and the drawer auto-opens, so you can route LFOs to any FX knob without preopening
+- **Two mod envelopes (ENV 1/ENV 2)** with AHDSR + draggable visual editor, routable as modulation sources like LFOs; supports bipolar amounts (−50%..+50%).
+- **Modulation drawer** (bottom-centre tab) with tabbed LFO/Mod Env cards, combined routing panel, and live filter response visualization.
 - **Arpeggiator** with up / down / up-down / random patterns, 1–4 octaves, gate, latch, and a one-tap export to Strudel
 - **Voice modes:** poly / mono / legato / scale, with glide time
   - Glide implemented via parallel mono `Tone.Synth` instances (PolySynth doesn't support portamento)
@@ -56,11 +58,15 @@ A playable, hackable synth in the browser:
 ### UI
 
 - Live oscilloscope + spectrum analyser as the page header background
+- **Arpeggiator + voicing** side-by-side in a compact 2-row layout at the bottom of the modulation drawer
+- **Filter + envelope sections** share the main grid in a half-width split (50% each)
+- Live **filter response curve** in the modulation drawer — reflects live LFO/mod env modulation in real time
 - 400+ built-in presets in a floating, physics-based picker — **hover or arrow-key to preview** (auto-restores your working patch when you leave), click or Enter to commit
 - Live JSON patch editor on the left, **Strudel** + **Effects** drawers on the right — all built on **CodeMirror 6** with custom Catppuccin highlighting
 - Catppuccin themes (**latte**, **catppuccin**, **catppuccin-oled**) with a snapping accent color picker
 - **Beginner's guide** modal: 15 lessons with embedded interactive visualizers (knob, waveform, envelope, filter)
 - Lucide icons throughout
+- **Modulation drawer** with LFO/mod env cards, routing panel; LFO and mod env amounts are bipolar (−50%..+50%)
 
 ### Networking & live coding
 
@@ -170,28 +176,35 @@ src/
       SubOsc.svelte         # Sub oscillator UI
       NoiseSection.svelte   # Noise generator UI
       Voicing.svelte        # Voice mode + glide UI
-      Envelope.svelte       # Draggable AHDSR + knob row, ResizeObserver-sized SVG
-      LFOCard.svelte        # Per-LFO controls (rate, shape, routes)
-      LFOWave.svelte        # Inline LFO shape preview
-      Waveform.svelte       # Static waveform preview
-      Knob.svelte           # Circular knob (drag, wheel, dblclick, exponential curves)
-      Visualizer.svelte     # Canvas oscilloscope + spectrum, theme-aware
-      ThemeToggle.svelte    # Theme + accent color picker
-      PatchEditor.svelte    # CodeMirror 6 JSON editor in a sliding drawer
-      StrudelDrawer.svelte  # CodeMirror 6 live coding drawer
-      EffectsDrawer.svelte  # Distortion / bitcrusher / chorus / delay / reverb
-                            # (auto-opens when an LFO rope is dragged onto its tab)
-      Arp.svelte            # Arpeggiator UI
-      Wheels.svelte         # Pitch bend (sprung) + mod wheel
-      MIDIIndicator.svelte  # Web MIDI status indicator
-      PresetCloud.svelte    # Physics-relaxation preset picker, hover-preview w/ snapshot restore
-      Cable.svelte          # Verlet-rope SVG drawn while dragging an LFO source
-      CursorLayer.svelte    # Multiplayer cursor overlay
-      SessionBadge.svelte   # Live-session presence badge
-      BrowseSessions.svelte # Public sessions browser modal
-      dragMod.svelte.ts     # Global state for "I'm dragging an LFO onto a target"
-      Guide.svelte          # 15-lesson beginner modal w/ live visualizers
-      guide/                # GuideKnob, GuideWave, GuideEnvelope, GuideFilter
+       Envelope.svelte       # Draggable AHDSR + knob row, ResizeObserver-sized SVG
+       LFOCard.svelte        # Per-LFO controls (rate, shape, routes) with tabbed LFOTabs
+       LFOWave.svelte        # Inline LFO shape preview
+       ModEnvCard.svelte     # Per-mod-envelope AHDSR + visualization, draggable title for routing
+       ModEnvTabs.svelte     # Tabbed ENV 1/ENV 2 container inside Modulation drawer
+       ModRouting.svelte     # Combined routing panel: LFOs + mod envs, all routes listed
+       FilterViz.svelte      # Live filter response curve (reflects LFO modulation via liveMod)
+       Waveform.svelte       # Static waveform preview
+       Knob.svelte           # Circular knob (drag, wheel, dblclick, exponential curves), bipolar routing support
+       Visualizer.svelte     # Canvas oscilloscope + spectrum, theme-aware
+       ThemeToggle.svelte    # Theme + accent color picker
+       PatchEditor.svelte    # CodeMirror 6 JSON editor in a sliding drawer
+       StrudelDrawer.svelte  # CodeMirror 6 live coding drawer
+       EffectsDrawer.svelte  # Distortion / bitcrusher / chorus / delay / reverb
+                             # (auto-opens when an LFO rope is dragged onto its tab)
+       ModulationDrawer.svelte # Bottom-centre tab, LFO tabs + mod env tabs + routing, live filter viz
+                             # (auto-opens when an LFO rope is dragged onto its tab, blocks routing through drawer)
+       Arp.svelte            # Arpeggiator UI (compact 2-row layout inside modulation drawer)
+       Wheels.svelte         # Pitch bend (sprung) + mod wheel
+       MIDIIndicator.svelte  # Web MIDI status indicator
+       PresetCloud.svelte    # Physics-based preset picker, hover-review w/ snapshot restore
+       Cable.svelte          # Verlet-rope SVG drawn while dragging an LFO source
+       CursorLayer.svelte    # Multiplayer cursor overlay
+       SessionBadge.svelte   # Live-session presence badge
+       BrowseSessions.svelte # Public sessions browser modal
+       dragMod.svelte.ts     # Global state for "I'm dragging a mod source onto a target"
+                             # (supports LFOs, mod envelopes, blocker rectangles)
+       Guide.svelte          # 15-lesson beginner modal w/ live visualizers
+       guide/                # GuideKnob, GuideWave, GuideEnvelope, GuideFilter
   routes/
     +page.svelte         # Layout: full-bleed visualizer header → controls → keys
     +layout.svelte       # Loads layout.css; favicon
