@@ -39,11 +39,11 @@
 
 	let svgEl: SVGSVGElement | null = $state(null);
 
-	// Mod-routing introspection: which LFOs route to this target?
+	// Mod-routing introspection: which mod sources route to this target?
 	const routes = $derived.by(() => {
-		if (!target) return [] as Array<{ which: 'lfo1' | 'lfo2'; amount: number }>;
-		const out: Array<{ which: 'lfo1' | 'lfo2'; amount: number }> = [];
-		for (const w of ['lfo1', 'lfo2'] as const) {
+		if (!target) return [] as Array<{ which: string; amount: number }>;
+		const out: Array<{ which: string; amount: number }> = [];
+		for (const w of ['lfo1', 'lfo2', 'modEnv1', 'modEnv2'] as const) {
 			const r = audio.patch[w].routes.find((r) => r.target === target);
 			if (r && audio.patch[w].enabled) out.push({ which: w, ...r });
 		}

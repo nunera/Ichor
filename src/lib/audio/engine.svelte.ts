@@ -8,6 +8,7 @@ import {
 	type Envelope,
 	type Filter,
 	type LFO,
+	type ModEnv,
 	type ModRoute,
 	type SubOsc,
 	type NoisePatch,
@@ -47,6 +48,7 @@ export type WriteEvent =
 	| { source: WriteSource; section: 'env'; value: Partial<Envelope> }
 	| { source: WriteSource; section: 'filter'; value: Partial<Filter> }
 	| { source: WriteSource; section: 'lfo1' | 'lfo2'; value: Partial<LFO> }
+	| { source: WriteSource; section: 'modEnv1' | 'modEnv2'; value: Partial<ModEnv> }
 	| { source: WriteSource; section: 'sub'; value: Partial<SubOsc> }
 	| { source: WriteSource; section: 'noise'; value: Partial<NoisePatch> }
 	| { source: WriteSource; section: 'voicing'; value: Partial<Voicing> }
@@ -88,10 +90,15 @@ class AudioEngine {
 	#noiseEnv: Tone.AmplitudeEnvelope | null = null;
 	#filter: Tone.Filter | null = null;
 	#cutoffSignal: Tone.Signal<'frequency'> | null = null;
+	#modEnv1: Tone.Envelope | null = null;
+	#modEnv2: Tone.Envelope | null = null;
+	#modEnv1Value = 0;
+	#modEnv2Value = 0;
 	#lfo1Phase = 0;
 	#lfo2Phase = 0;
 	#modRaf: number | null = null;
 	#lastModTime = 0;
+	#lastModulated = new Set<string>();
 	#analyser: Tone.Analyser | null = null;
 	#fft: Tone.Analyser | null = null;
 	// Effects chain order: filter → distortion → bit-drive → bit-crusher → bit-tone → chorus → delay → reverb → out.
@@ -232,6 +239,25 @@ class AudioEngine {
 		this.#osc2Mono = this.#createMonoSynth(this.patch.osc2.synthType);
 		this.#osc2Mono?.connect(this.#osc2Gain);
 		this.#subMono = new Tone.Synth().connect(this.#subGain);
+
+		// Mod envelopes: standalone Tone.Envelope instances (not connected to
+		// any audio node). We sample their value each modTick and apply via the
+		// mod-matrix, exactly like LFOs but envelope-shaped.
+		this.#modEnv1 = new Tone.Envelope({
+			attack: this.patch.modEnv1.attack,
+			decay: this.patch.modEnv1.decay,
+			sustain: this.patch.modEnv1.sustain,
+			release: this.patch.modEnv1.release
+		});
+		this.#modEnv2 = new Tone.Envelope({
+			attack: this.patch.modEnv2.attack,
+			decay: this.patch.modEnv2.decay,
+			sustain: this.patch.modEnv2.sustain,
+			release: this.patch.modEnv2.release
+		});
+		// Apply hold emulation + current settings.
+		this.#applyModEnvOne('modEnv1', this.patch.modEnv1);
+		this.#applyModEnvOne('modEnv2', this.patch.modEnv2);
 
 		// Start the modulation rAF loop. We track phase in software for LFOs
 		// because we route them to arbitrary targets, bypassing the audio graph.
@@ -676,6 +702,50 @@ class AudioEngine {
 		this.#emit({ source, section: 'lfo2', value: v });
 	}
 
+	/* ---- Mod envelopes ----------------------------------------------------- */
+
+	#applyModEnvOne(which: 'modEnv1' | 'modEnv2', p: Partial<ModEnv>) {
+		const env = which === 'modEnv1' ? this.#modEnv1 : this.#modEnv2;
+		if (!env) return;
+		// Tone.Envelope doesn't have a native `hold` phase, so we emulate it by
+		// folding hold into the attack time and using an attackCurve that reaches
+		// 1 at the end of the original attack and stays there for the hold.
+		if (p.attack !== undefined || p.hold !== undefined) {
+			const e = this.patch[which];
+			const a = Math.max(0.001, e.attack);
+			const h = Math.max(0, e.hold);
+			const total = a + h;
+			const N = 64;
+			const split = a / total;
+			const curve: number[] = new Array(N);
+			for (let i = 0; i < N; i++) {
+				const t = i / (N - 1);
+				curve[i] = t <= split ? t / split : 1;
+			}
+			env.attack = total;
+			(env as any).attackCurve = curve as unknown as Tone.EnvelopeCurve;
+		}
+		if (p.decay !== undefined) env.decay = p.decay;
+		if (p.sustain !== undefined) env.sustain = p.sustain;
+		if (p.release !== undefined) env.release = p.release;
+	}
+
+	setModEnv1(p: Partial<ModEnv>, source: WriteSource = 'ui') {
+		const v = validateSection('modEnv1', p);
+		Object.assign(this.patch.modEnv1, v);
+		this.#applyModEnvOne('modEnv1', v);
+		if (v.routes) this.#syncRouteAmtTargets();
+		this.#emit({ source, section: 'modEnv1', value: v });
+	}
+
+	setModEnv2(p: Partial<ModEnv>, source: WriteSource = 'ui') {
+		const v = validateSection('modEnv2', p);
+		Object.assign(this.patch.modEnv2, v);
+		this.#applyModEnvOne('modEnv2', v);
+		if (v.routes) this.#syncRouteAmtTargets();
+		this.#emit({ source, section: 'modEnv2', value: v });
+	}
+
 	/** Backwards-compat shim: legacy callers (Strudel ctrls, network msgs)
 	 *  that still address the old single 'lfo' route to lfo1. */
 	setLFO(p: Partial<LFO>, source: WriteSource = 'ui') {
@@ -684,50 +754,60 @@ class AudioEngine {
 
 	/* ---- Mod-route mutation ------------------------------------------------ */
 
-	addRoute(which: 'lfo1' | 'lfo2', target: string, source: WriteSource = 'ui') {
-		const lfo = this.patch[which];
-		// If already routed to this target, do nothing.
-		if (lfo.routes.some((r) => r.target === target)) return;
+	/** All routable mod sources. */
+	static MOD_SOURCES = ['lfo1', 'lfo2', 'modEnv1', 'modEnv2'] as const;
+
+	addRoute(
+		which: 'lfo1' | 'lfo2' | 'modEnv1' | 'modEnv2',
+		target: string,
+		source: WriteSource = 'ui'
+	) {
+		const src = this.patch[which];
+		if (src.routes.some((r) => r.target === target)) return;
 		const t = modTargets.get(target);
 		if (!t) return;
-		// Default amount is in knob-space (0..0.5). 0.15 is noticeable but not
-		// full-range chaos.
 		const amount = 0.15;
-		const next = [...lfo.routes, { target, amount }];
-		this.setLFO1Routes(which, next, source);
+		const next = [...src.routes, { target, amount }];
+		this.#setRoutes(which, next, source);
 	}
 
 	updateRoute(
-		which: 'lfo1' | 'lfo2',
+		which: 'lfo1' | 'lfo2' | 'modEnv1' | 'modEnv2',
 		target: string,
 		patch: Partial<ModRoute>,
 		source: WriteSource = 'ui'
 	) {
-		const lfo = this.patch[which];
-		const next = lfo.routes.map((r) => (r.target === target ? { ...r, ...patch } : r));
-		this.setLFO1Routes(which, next, source);
+		const src = this.patch[which];
+		const next = src.routes.map((r) => (r.target === target ? { ...r, ...patch } : r));
+		this.#setRoutes(which, next, source);
 	}
 
-	removeRoute(which: 'lfo1' | 'lfo2', target: string, source: WriteSource = 'ui') {
-		const lfo = this.patch[which];
-		const next = lfo.routes.filter((r) => r.target !== target);
-		this.setLFO1Routes(which, next, source);
-		// If no LFO is still routed to this target, snap the audio param back
-		// to the user's base value so it doesn't get stuck at the last modulated
-		// reading.
-		const stillRouted =
-			this.patch.lfo1.routes.some((r) => r.target === target) ||
-			this.patch.lfo2.routes.some((r) => r.target === target);
+	removeRoute(
+		which: 'lfo1' | 'lfo2' | 'modEnv1' | 'modEnv2',
+		target: string,
+		source: WriteSource = 'ui'
+	) {
+		const src = this.patch[which];
+		const next = src.routes.filter((r) => r.target !== target);
+		this.#setRoutes(which, next, source);
+		// If no source is still routed to this target, snap back to base.
+		const stillRouted = AudioEngine.MOD_SOURCES.some((w) =>
+			this.patch[w].routes.some((r) => r.target === target)
+		);
 		if (!stillRouted) {
 			const t = modTargets.get(target);
 			if (t) t.apply(t.getBase());
 		}
 	}
 
-	private setLFO1Routes(which: 'lfo1' | 'lfo2', routes: ModRoute[], source: WriteSource) {
+	#setRoutes(
+		which: 'lfo1' | 'lfo2' | 'modEnv1' | 'modEnv2',
+		routes: ModRoute[],
+		source: WriteSource
+	) {
 		this.patch[which].routes = routes;
 		this.#syncRouteAmtTargets();
-		this.#emit({ source, section: which, value: { routes } });
+		this.#emit({ source, section: which, value: { routes } } as WriteEvent);
 	}
 
 	setSub(p: Partial<SubOsc>, source: WriteSource = 'ui') {
@@ -866,6 +946,8 @@ class AudioEngine {
 		this.patch.filter = { ...next.filter };
 		this.patch.lfo1 = { ...next.lfo1, routes: [...next.lfo1.routes] };
 		this.patch.lfo2 = { ...next.lfo2, routes: [...next.lfo2.routes] };
+		this.patch.modEnv1 = { ...next.modEnv1, routes: [...next.modEnv1.routes] };
+		this.patch.modEnv2 = { ...next.modEnv2, routes: [...next.modEnv2.routes] };
 		this.patch.sub = { ...next.sub };
 		this.patch.noise = { ...next.noise };
 		this.patch.voicing = { ...next.voicing };
@@ -891,6 +973,8 @@ class AudioEngine {
 		this.#applyFilter(this.patch.filter);
 		this.#applyLFOOne('lfo1', this.patch.lfo1);
 		this.#applyLFOOne('lfo2', this.patch.lfo2);
+		this.#applyModEnvOne('modEnv1', this.patch.modEnv1);
+		this.#applyModEnvOne('modEnv2', this.patch.modEnv2);
 		this.#applySub(this.patch.sub);
 		this.#applyNoise(this.patch.noise);
 		this.#applyVoicing(this.patch.voicing);
@@ -977,6 +1061,10 @@ class AudioEngine {
 		if (this.patch.noise.enabled && wasEmpty) {
 			this.#noiseEnv?.triggerAttack(time);
 		}
+
+		// Mod envelopes trigger on every note-on (retrigger).
+		if (this.patch.modEnv1.enabled) this.#modEnv1?.triggerAttack(time);
+		if (this.patch.modEnv2.enabled) this.#modEnv2?.triggerAttack(time);
 	}
 
 	#triggerSlot(which: 'osc1' | 'osc2', note: string, time: number | undefined, useGlide: boolean) {
@@ -1037,6 +1125,9 @@ class AudioEngine {
 
 		if (this.#held.size === 0) {
 			this.#noiseEnv?.triggerRelease(time);
+			// Release mod envelopes when all notes are up.
+			if (this.patch.modEnv1.enabled) this.#modEnv1?.triggerRelease(time);
+			if (this.patch.modEnv2.enabled) this.#modEnv2?.triggerRelease(time);
 		}
 	}
 
@@ -1091,6 +1182,8 @@ class AudioEngine {
 		this.#pluck2Voices.clear();
 		this.#held.clear();
 		this.#noiseEnv?.triggerRelease();
+		this.#modEnv1?.triggerRelease();
+		this.#modEnv2?.triggerRelease();
 	}
 
 	/* ----------------------------------------------------------------------- */
@@ -1517,7 +1610,7 @@ class AudioEngine {
 	#routeAmtUnregs = new Map<string, () => void>();
 	#syncRouteAmtTargets() {
 		const desired = new Set<string>();
-		for (const w of ['lfo1', 'lfo2'] as const) {
+		for (const w of AudioEngine.MOD_SOURCES) {
 			for (const r of this.patch[w].routes) {
 				const id = `${w}.route.${r.target}.amount`;
 				desired.add(id);
@@ -1529,7 +1622,7 @@ class AudioEngine {
 					min: 0,
 					max: 0.5,
 					getBase: () => {
-						const route = this.patch[w].routes.find((rr) => rr.target === r.target);
+						const route = this.patch[w].routes.find((rr: ModRoute) => rr.target === r.target);
 						return route ? Math.abs(route.amount) : 0;
 					},
 					apply: () => {
@@ -1607,8 +1700,8 @@ class AudioEngine {
 		const v2 = this.patch.lfo2.enabled ? this.#waveAt(this.#lfo2Phase, this.patch.lfo2.shape) : 0;
 
 		// Resolve per-route effective amount (one-frame lag ok). The route-amt
-		// target id is 'lfoN.route.{target}.amount'.
-		const resolveAmt = (w: 'lfo1' | 'lfo2', r: ModRoute): number => {
+		// target id is 'sourceN.route.{target}.amount'.
+		const resolveAmt = (w: string, r: ModRoute): number => {
 			const id = `${w}.route.${r.target}.amount`;
 			const live = liveMod.get(id);
 			const sign = Math.sign(r.amount || 1);
@@ -1616,21 +1709,55 @@ class AudioEngine {
 		};
 
 		const contributions = new Map<string, number>();
-		const accumulate = (
-			w: 'lfo1' | 'lfo2',
-			routes: ModRoute[],
-			lfoVal: number,
-			enabled: boolean
-		) => {
+		const accumulate = (w: string, routes: ModRoute[], value: number, enabled: boolean) => {
 			if (!enabled) return;
 			for (const r of routes) {
 				const existing = contributions.get(r.target) || 0;
-				const add = resolveAmt(w, r) * lfoVal * wheelBoost;
+				const add = resolveAmt(w, r) * value * wheelBoost;
 				contributions.set(r.target, existing + add);
 			}
 		};
 		accumulate('lfo1', this.patch.lfo1.routes, v1, this.patch.lfo1.enabled);
 		accumulate('lfo2', this.patch.lfo2.routes, v2, this.patch.lfo2.enabled);
+
+		// Sample mod envelopes (0..1 output). We read the Tone.Envelope value
+		// directly. Tone.Envelope outputs a signal; we grab the current value.
+		if (this.#modEnv1) {
+			this.#modEnv1Value = this.patch.modEnv1.enabled
+				? ((this.#modEnv1 as any).getValueAtTime(Tone.now()) ?? 0)
+				: 0;
+		}
+		if (this.#modEnv2) {
+			this.#modEnv2Value = this.patch.modEnv2.enabled
+				? ((this.#modEnv2 as any).getValueAtTime(Tone.now()) ?? 0)
+				: 0;
+		}
+		accumulate(
+			'modEnv1',
+			this.patch.modEnv1.routes,
+			this.#modEnv1Value,
+			this.patch.modEnv1.enabled
+		);
+		accumulate(
+			'modEnv2',
+			this.patch.modEnv2.routes,
+			this.#modEnv2Value,
+			this.patch.modEnv2.enabled
+		);
+
+		// Reset any targets that were modulated last frame but are not being
+		// modulated now (e.g. LFO got disabled). Without this, audio params and
+		// visualizations can get stuck at the last modulated value.
+		const nextModulated = new Set<string>();
+		for (const id of contributions.keys()) nextModulated.add(id);
+		for (const id of this.#lastModulated) {
+			if (nextModulated.has(id)) continue;
+			const t = modTargets.get(id);
+			if (!t) continue;
+			const base = t.getBase();
+			t.apply(base);
+			liveMod.set(id, base);
+		}
 
 		for (const [id, amount] of contributions) {
 			const t = modTargets.get(id);
@@ -1648,6 +1775,7 @@ class AudioEngine {
 			t.apply(eff);
 			liveMod.set(id, eff);
 		}
+		this.#lastModulated = nextModulated;
 	}
 }
 

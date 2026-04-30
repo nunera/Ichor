@@ -1,27 +1,59 @@
 <script lang="ts">
 	import { audio } from '$lib/audio/engine.svelte';
+	import { dragMod } from './dragMod.svelte';
 	import Knob from './Knob.svelte';
 
-	const env = $derived(audio.patch.env);
+	type Props = {
+		which: 'modEnv1' | 'modEnv2';
+		showRoutes?: boolean;
+	};
+	let { which, showRoutes = true }: Props = $props();
 
-	// Maximum durations (seconds) used to scale time on screen.
-	const MAX = { attack: 8, hold: 8, decay: 8, release: 8 };
-	const PAD = 12;
-	// Extra room reserved at the bottom for the A/H/D/S/R stage labels so the
-	// baseline handles (release end, decay/sustain) never overlap them or get
-	// clipped by a parent with rounded corners / overflow:hidden.
-	const LABEL_PAD = 14;
+	const env = $derived(audio.patch[which]);
+	const label = $derived(which === 'modEnv1' ? 'env 1' : 'env 2');
 
-	// The SVG measures its own size and we set viewBox 1:1 with CSS pixels,
-	// so circles stay round and text stays normal width. Stage widths are
-	// derived from the actual width so the curve fills the box.
+	function set(p: Parameters<typeof audio.setModEnv1>[0]) {
+		if (which === 'modEnv1') audio.setModEnv1(p);
+		else audio.setModEnv2(p);
+	}
+
+	let titleEl: HTMLElement | null = $state(null);
+
+	function onTitlePointerDown(e: PointerEvent) {
+		const rect = titleEl?.getBoundingClientRect();
+		if (!rect) return;
+		const anchor = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+		const cursor = { x: e.clientX, y: e.clientY };
+		dragMod.begin(which, anchor, cursor);
+		e.preventDefault();
+		window.addEventListener('pointermove', onWinMove);
+		window.addEventListener('pointerup', onWinUp, { once: true });
+	}
+
+	function onWinMove(e: PointerEvent) {
+		dragMod.move({ x: e.clientX, y: e.clientY });
+	}
+
+	function onWinUp() {
+		window.removeEventListener('pointermove', onWinMove);
+		const result = dragMod.end();
+		if (result) audio.addRoute(result.lfo, result.target);
+	}
+
+	function fmt(v: number) {
+		return v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`;
+	}
+
+	/* ---- Envelope visualization -------------------------------------------- */
+	const MAX = { attack: 2, hold: 2, decay: 2, release: 4 };
+	const PAD = 8;
+	const LABEL_PAD = 12;
+
 	let svgEl: SVGSVGElement;
-	let viewW = $state(640);
-	let viewH = $state(180);
+	let viewW = $state(320);
+	let viewH = $state(100);
 
-	// Inner stage proportions (sum = 1). Distribute the available content
-	// width across stages: attack | hold | decay | sustain pad | release.
-	const STAGE_RATIO = { attack: 0.18, hold: 0.18, decay: 0.18, sustainPad: 0.16, release: 0.3 };
+	const STAGE_RATIO = { attack: 0.2, hold: 0.15, decay: 0.2, sustainPad: 0.15, release: 0.3 };
 	const innerW = $derived(viewW - PAD * 2);
 	const W = $derived({
 		attack: innerW * STAGE_RATIO.attack,
@@ -30,44 +62,27 @@
 		sustainPad: innerW * STAGE_RATIO.sustainPad,
 		release: innerW * STAGE_RATIO.release
 	});
-	const H = $derived(viewH);
-	const totalW = $derived(viewW);
 
-	// Convert seconds → x offset within each stage.
 	const ax = $derived((env.attack / MAX.attack) * W.attack);
 	const hx = $derived((env.hold / MAX.hold) * W.hold);
 	const dx = $derived((env.decay / MAX.decay) * W.decay);
 	const rx = $derived((env.release / MAX.release) * W.release);
 
-	// Stage X boundaries.
 	const x0 = PAD;
-	const x1 = $derived(x0 + ax); // end of attack
-	const x2 = $derived(x1 + hx); // end of hold
-	const x3 = $derived(x2 + dx); // end of decay (sustain start)
-	const x4 = $derived(x3 + W.sustainPad); // sustain end
-	const x5 = $derived(x4 + rx); // release end
+	const x1 = $derived(x0 + ax);
+	const x2 = $derived(x1 + hx);
+	const x3 = $derived(x2 + dx);
+	const x4 = $derived(x3 + W.sustainPad);
+	const x5 = $derived(x4 + rx);
 
 	const yTop = PAD;
-	const yBot = H - PAD - LABEL_PAD;
+	const yBot = $derived(viewH - PAD - LABEL_PAD);
 	const sustainY = $derived(yBot - env.sustain * (yBot - yTop));
 
-	const path = $derived(
-		`M ${x0} ${yBot}` +
-			` L ${x1} ${yTop}` +
-			` L ${x2} ${yTop}` +
-			` L ${x3} ${sustainY}` +
-			` L ${x4} ${sustainY}` +
-			` L ${x5} ${yBot}`
+	const curvePath = $derived(
+		`M ${x0} ${yBot} L ${x1} ${yTop} L ${x2} ${yTop} L ${x3} ${sustainY} L ${x4} ${sustainY} L ${x5} ${yBot}`
 	);
-
-	const fill = $derived(
-		`M ${x0} ${yBot}` +
-			` L ${x1} ${yTop}` +
-			` L ${x2} ${yTop}` +
-			` L ${x3} ${sustainY}` +
-			` L ${x4} ${sustainY}` +
-			` L ${x5} ${yBot} Z`
-	);
+	const fillPath = $derived(curvePath + ' Z');
 
 	type Handle = 'A' | 'H' | 'D' | 'S' | 'R';
 	let dragging = $state<Handle | null>(null);
@@ -89,27 +104,27 @@
 		switch (dragging) {
 			case 'A': {
 				const v = clamp((x - x0) / W.attack, 0, 1) * MAX.attack;
-				audio.setEnvelope({ attack: v });
+				set({ attack: v });
 				break;
 			}
 			case 'H': {
 				const v = clamp((x - x1) / W.hold, 0, 1) * MAX.hold;
-				audio.setEnvelope({ hold: v });
+				set({ hold: v });
 				break;
 			}
 			case 'D': {
 				const v = clamp((x - x2) / W.decay, 0, 1) * MAX.decay;
-				audio.setEnvelope({ decay: v });
+				set({ decay: v });
 				break;
 			}
 			case 'S': {
 				const s = clamp((yBot - y) / (yBot - yTop), 0, 1);
-				audio.setEnvelope({ sustain: s });
+				set({ sustain: s });
 				break;
 			}
 			case 'R': {
 				const v = clamp((x - x4) / W.release, 0, 1) * MAX.release;
-				audio.setEnvelope({ release: v });
+				set({ release: v });
 				break;
 			}
 		}
@@ -123,32 +138,47 @@
 		return Math.max(lo, Math.min(hi, v));
 	}
 
-	function fmt(v: number) {
-		return v < 1 ? `${(v * 1000).toFixed(0)} ms` : `${v.toFixed(2)} s`;
-	}
-
 	$effect(() => {
 		if (!svgEl) return;
 		const ro = new ResizeObserver(([entry]) => {
 			const r = entry.contentRect;
 			viewW = Math.max(120, r.width);
-			viewH = Math.max(96, r.height);
+			viewH = Math.max(60, r.height);
 		});
 		ro.observe(svgEl);
 		return () => ro.disconnect();
 	});
 </script>
 
-<div class="flex h-full min-h-0 flex-col gap-2">
-	<div class="flex shrink-0 items-baseline justify-between">
-		<h3 class="text-xs tracking-widest text-subtext0 uppercase">envelope</h3>
-		<span class="text-[10px] text-overlay1">drag the dots</span>
-	</div>
+<section
+	class="flex h-full min-h-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-surface0 bg-mantle/60 p-2"
+>
+	<header class="flex items-center gap-1.5">
+		<input
+			type="checkbox"
+			checked={env.enabled}
+			onchange={(e) => set({ enabled: e.currentTarget.checked })}
+			class="accent-mauve"
+			aria-label="enable {label}"
+		/>
+		<button
+			bind:this={titleEl}
+			onpointerdown={onTitlePointerDown}
+			class="cursor-grab rounded px-1 text-[11px] tracking-widest text-text uppercase select-none active:cursor-grabbing"
+			class:bg-sapphire={dragMod.source?.lfo === which}
+			class:text-base={dragMod.source?.lfo === which}
+			title="drag onto a knob to route this mod envelope"
+		>
+			{label}
+		</button>
+	</header>
 
+	<!-- ADSR visualization -->
 	<svg
 		bind:this={svgEl}
-		viewBox="0 0 {totalW} {H}"
-		class="min-h-0 w-full flex-1 touch-none rounded-md bg-mantle"
+		viewBox="0 0 {viewW} {viewH}"
+		class="min-h-0 w-full flex-1 touch-none rounded-md bg-base/60"
+		class:opacity-50={!env.enabled}
 		style:overflow="visible"
 		onpointermove={onMove}
 		onpointerup={onUp}
@@ -190,51 +220,57 @@
 		/>
 
 		<!-- Filled curve -->
-		<path d={fill} class="fill-mauve/20" />
-		<!-- Curve -->
-		<path d={path} class="stroke-mauve" stroke-width="2" fill="none" stroke-linejoin="round" />
+		<path d={fillPath} class="fill-sapphire/20" />
+		<!-- Curve stroke -->
+		<path
+			d={curvePath}
+			class="stroke-sapphire"
+			stroke-width="2"
+			fill="none"
+			stroke-linejoin="round"
+		/>
 
-		<!-- Handles -->
+		<!-- Drag handles -->
 		<circle
 			cx={x1}
 			cy={yTop}
-			r="6"
-			class="cursor-ew-resize fill-mauve"
+			r="5"
+			class="cursor-ew-resize fill-sapphire"
 			onpointerdown={(e) => onDown('A', e)}
 		/>
 		<circle
 			cx={x2}
 			cy={yTop}
-			r="6"
-			class="cursor-ew-resize fill-lavender"
+			r="5"
+			class="cursor-ew-resize fill-teal"
 			onpointerdown={(e) => onDown('H', e)}
 		/>
 		<circle
 			cx={x3}
 			cy={sustainY}
-			r="6"
+			r="5"
 			class="cursor-move fill-blue"
 			onpointerdown={(e) => onDown('D', e)}
 		/>
 		<circle
 			cx={x4}
 			cy={sustainY}
-			r="6"
-			class="cursor-ns-resize fill-sapphire"
+			r="5"
+			class="cursor-ns-resize fill-sky"
 			onpointerdown={(e) => onDown('S', e)}
 		/>
 		<circle
 			cx={x5}
 			cy={yBot}
-			r="6"
-			class="cursor-ew-resize fill-mauve"
+			r="5"
+			class="cursor-ew-resize fill-sapphire"
 			onpointerdown={(e) => onDown('R', e)}
 		/>
 
 		<!-- Stage labels -->
 		<g
 			class="fill-subtext0"
-			font-size="9"
+			font-size="8"
 			text-anchor="middle"
 			font-family="ui-monospace, monospace"
 		>
@@ -250,75 +286,90 @@
 		</g>
 	</svg>
 
-	<div class="grid shrink-0 grid-cols-5 gap-2">
+	<!-- AHDSR knobs row -->
+	<div class="grid shrink-0 grid-cols-5 gap-1" class:opacity-50={!env.enabled}>
 		<div class="flex justify-center">
 			<Knob
-				label="attack"
-				target="env.attack"
+				label="A"
+				target={`${which}.attack`}
 				value={env.attack}
 				min={0.001}
 				max={8}
 				step={0.001}
-				size={24}
 				curve={2}
+				size={20}
 				format={fmt}
-				onchange={(v) => audio.setEnvelope({ attack: v })}
+				onchange={(v) => set({ attack: v })}
 			/>
 		</div>
 		<div class="flex justify-center">
 			<Knob
-				label="hold"
-				target="env.hold"
+				label="H"
+				target={`${which}.hold`}
 				value={env.hold}
 				min={0}
 				max={8}
 				step={0.001}
-				size={24}
 				curve={2}
+				size={20}
 				format={fmt}
-				onchange={(v) => audio.setEnvelope({ hold: v })}
+				onchange={(v) => set({ hold: v })}
 			/>
 		</div>
 		<div class="flex justify-center">
 			<Knob
-				label="decay"
-				target="env.decay"
+				label="D"
+				target={`${which}.decay`}
 				value={env.decay}
 				min={0.001}
 				max={8}
 				step={0.001}
-				size={24}
 				curve={2}
+				size={20}
 				format={fmt}
-				onchange={(v) => audio.setEnvelope({ decay: v })}
+				onchange={(v) => set({ decay: v })}
 			/>
 		</div>
 		<div class="flex justify-center">
 			<Knob
-				label="sustain"
-				target="env.sustain"
+				label="S"
+				target={`${which}.sustain`}
 				value={env.sustain}
 				min={0}
 				max={1}
 				step={0.01}
-				size={24}
+				size={20}
 				format={(v) => `${(v * 100).toFixed(0)}%`}
-				onchange={(v) => audio.setEnvelope({ sustain: v })}
+				onchange={(v) => set({ sustain: v })}
 			/>
 		</div>
 		<div class="flex justify-center">
 			<Knob
-				label="release"
-				target="env.release"
+				label="R"
+				target={`${which}.release`}
 				value={env.release}
 				min={0.001}
 				max={8}
 				step={0.001}
-				size={24}
 				curve={2}
+				size={20}
 				format={fmt}
-				onchange={(v) => audio.setEnvelope({ release: v })}
+				onchange={(v) => set({ release: v })}
 			/>
 		</div>
 	</div>
-</div>
+
+	{#if !showRoutes}
+		<div class="min-w-0">
+			{#if env.routes.length === 0}
+				<p class="truncate text-[9px] leading-tight text-overlay1">
+					drag the title onto a knob to route
+				</p>
+			{:else}
+				<p class="text-[9px] tracking-wide text-subtext0 uppercase">
+					{env.routes.length} route{env.routes.length === 1 ? '' : 's'}
+				</p>
+			{/if}
+		</div>
+	{/if}
+</section>

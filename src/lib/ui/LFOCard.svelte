@@ -6,8 +6,12 @@
 	import Knob from './Knob.svelte';
 	import { X } from 'lucide-svelte';
 
-	type Props = { which: 'lfo1' | 'lfo2' };
-	let { which }: Props = $props();
+	type Props = {
+		which: 'lfo1' | 'lfo2';
+		/** Hide the inline routes list (e.g. when a separate routing panel renders them). */
+		showRoutes?: boolean;
+	};
+	let { which, showRoutes = true }: Props = $props();
 
 	const lfo = $derived(audio.patch[which]);
 	const label = $derived(which === 'lfo1' ? 'lfo 1' : 'lfo 2');
@@ -116,14 +120,18 @@
 				<p class="truncate text-[9px] leading-tight text-overlay1">
 					drag the title onto a knob to route
 				</p>
-			{:else}
+			{:else if showRoutes}
 				<p class="text-[9px] tracking-wide text-subtext0 uppercase">routes</p>
+			{:else}
+				<p class="text-[9px] tracking-wide text-subtext0 uppercase">
+					{lfo.routes.length} route{lfo.routes.length === 1 ? '' : 's'}
+				</p>
 			{/if}
 		</div>
 	</div>
 
 	<!-- Routes list (scrolls if many) -->
-	{#if lfo.routes.length > 0}
+	{#if showRoutes && lfo.routes.length > 0}
 		<div class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
 			{#each lfo.routes as r (r.target)}
 				<div class="flex items-center gap-1.5 rounded bg-base/50 px-1.5 py-1">
@@ -133,16 +141,13 @@
 					<Knob
 						label="amt"
 						target={`${which}.route.${r.target}.amount`}
-						value={Math.abs(r.amount)}
-						min={0}
+						value={r.amount}
+						min={-0.5}
 						max={0.5}
 						step={0.005}
 						size={22}
-						format={(v) => `${Math.round(v * 200)}%`}
-						onchange={(v) =>
-							audio.updateRoute(which, r.target, {
-								amount: v * Math.sign(r.amount || 1)
-							})}
+						format={(v) => `${v < 0 ? '−' : '+'}${Math.round(Math.abs(v) * 200)}%`}
+						onchange={(v) => audio.updateRoute(which, r.target, { amount: v })}
 					/>
 					<button
 						onclick={() => audio.removeRoute(which, r.target)}

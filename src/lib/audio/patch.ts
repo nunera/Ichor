@@ -77,9 +77,20 @@ export const ModRouteSchema = z.object({
 	 * Modulation amount in knob-space (0..0.5). 0.5 means the LFO can sweep
 	 * across the entire knob travel (subject to clamping).
 	 */
-	amount: z.number().min(0).max(0.5).default(0)
+	amount: z.number().min(-0.5).max(0.5).default(0)
 });
 export type ModRoute = z.infer<typeof ModRouteSchema>;
+
+export const ModEnvSchema = z.object({
+	enabled: z.boolean().default(false),
+	attack: z.number().min(0.001).max(10).default(0.02),
+	hold: z.number().min(0).max(10).default(0),
+	decay: z.number().min(0.001).max(10).default(0.25),
+	sustain: z.number().min(0).max(1).default(0),
+	release: z.number().min(0.001).max(10).default(0.3),
+	routes: z.array(ModRouteSchema).default([])
+});
+export type ModEnv = z.infer<typeof ModEnvSchema>;
 
 export const LFOSchema = z.object({
 	rate: z.number().min(0.01).max(40),
@@ -232,6 +243,24 @@ const PatchObject = z.object({
 	osc1: OscPatchSchema,
 	osc2: OscPatchSchema,
 	env: EnvelopeSchema,
+	modEnv1: ModEnvSchema.default({
+		enabled: false,
+		attack: 0.02,
+		hold: 0,
+		decay: 0.25,
+		sustain: 0,
+		release: 0.3,
+		routes: []
+	}),
+	modEnv2: ModEnvSchema.default({
+		enabled: false,
+		attack: 0.02,
+		hold: 0,
+		decay: 0.25,
+		sustain: 0,
+		release: 0.3,
+		routes: []
+	}),
 	filter: FilterSchema,
 	lfo1: LFOSchema,
 	lfo2: LFOSchema,
@@ -307,6 +336,24 @@ export const defaultPatch: Patch = {
 		pluckResonance: 0.7
 	},
 	env: { attack: 0.01, hold: 0, decay: 0.15, sustain: 0.7, release: 0.4 },
+	modEnv1: {
+		enabled: false,
+		attack: 0.02,
+		hold: 0,
+		decay: 0.25,
+		sustain: 0,
+		release: 0.3,
+		routes: []
+	},
+	modEnv2: {
+		enabled: false,
+		attack: 0.02,
+		hold: 0,
+		decay: 0.25,
+		sustain: 0,
+		release: 0.3,
+		routes: []
+	},
 	filter: { cutoff: 4000, resonance: 2, type: 'lowpass' },
 	lfo1: {
 		rate: 4,
@@ -340,6 +387,8 @@ export const SectionPartials = {
 	osc1: OscPatchSchema.partial(),
 	osc2: OscPatchSchema.partial(),
 	env: EnvelopeSchema.partial(),
+	modEnv1: ModEnvSchema.partial(),
+	modEnv2: ModEnvSchema.partial(),
 	filter: FilterSchema.partial(),
 	lfo1: LFOSchema.partial(),
 	lfo2: LFOSchema.partial(),

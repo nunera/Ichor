@@ -13,6 +13,7 @@
 	import BrowseSessions from '$lib/ui/BrowseSessions.svelte';
 	import StrudelDrawer from '$lib/ui/StrudelDrawer.svelte';
 	import EffectsDrawer from '$lib/ui/EffectsDrawer.svelte';
+	import ModulationDrawer from '$lib/ui/ModulationDrawer.svelte';
 	import MIDIIndicator from '$lib/ui/MIDIIndicator.svelte';
 	import Guide from '$lib/ui/Guide.svelte';
 	import CursorLayer from '$lib/ui/CursorLayer.svelte';
@@ -30,6 +31,7 @@
 <PatchEditor />
 <StrudelDrawer />
 <EffectsDrawer />
+<ModulationDrawer />
 <CursorLayer />
 
 {#if dragMod.source}
@@ -107,8 +109,8 @@
 			<SoundDesign />
 		</div>
 
-		<!-- Performance row: pitch/mod wheels | keyboard | voicing.
-		     Wheels and Voicing share the keyboard's height (h-32) so they all bottom-align. -->
+		<!-- Performance row: pitch/mod wheels | keyboard | (arp + voicing stacked).
+		     All blocks share the keyboard's height (h-32). -->
 		<div class="flex items-end gap-3">
 			<div class="h-32 shrink-0">
 				<Wheels />
@@ -116,11 +118,13 @@
 			<div class="h-32 w-[34rem] min-w-0 shrink-0">
 				<Keyboard octaves={2} />
 			</div>
-			<div class="h-32 min-w-0 flex-1">
-				<Arp />
-			</div>
-			<div class="h-32 w-32 shrink-0">
-				<Voicing />
+			<div class="flex h-32 min-w-0 flex-1 items-stretch gap-3">
+				<div class="min-w-0 flex-1">
+					<Arp />
+				</div>
+				<div class="min-w-0 flex-1">
+					<Voicing />
+				</div>
 			</div>
 		</div>
 
