@@ -170,7 +170,7 @@
 			{#if CodeMirror && jsonLang && catppuccinTheme}
 				<CodeMirror
 					value={text}
-					on:change={(e: any) => onInput(e.detail)}
+					onchange={(val: string) => onInput(val)}
 					lang={jsonLang()}
 					syntaxHighlighting={{ highlighter: catppuccinTheme, fallback: true }}
 					styles={{
