@@ -261,6 +261,12 @@ Nothing here is committed to. It's a list of things that would be cool, in rough
 
 ---
 
+## Contributors
+
+- [Michael Kryvonis](https://github.com/nunera)
+- [Zachary](https://github.com/ZacharySF)
+
+
 ## Contributing
 
 Open an issue describing the feature you want to take, or a sound you wish existed in the browser. Keep PRs small and focused.
